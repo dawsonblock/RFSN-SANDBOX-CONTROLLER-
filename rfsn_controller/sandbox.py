@@ -1,0 +1,245 @@
+"""Sandbox utilities for the RFSN controller.
+
+This module defines a simple abstraction for creating and managing a disposable
+git sandbox. All filesystem and git operations are executed within this
+sandbox to isolate side effects. Only public GitHub repositories are
+allowed to be cloned.
+"""
+
+from __future__ import annotations
+
+import os
+import shutil
+import subprocess
+import tempfile
+import uuid
+from dataclasses import dataclass
+from typing import Dict, Any, Tuple, List
+import shlex
+
+
+@dataclass
+class Sandbox:
+    """A disposable workspace for running git operations."""
+
+    root: str  # root directory of the sandbox
+    repo_dir: str  # path to the cloned repository within the sandbox
+
+
+def _run(cmd: str, cwd: str, timeout_sec: int = 120) -> Tuple[int, str, str]:
+    """Run a shell command and capture its output.
+
+    Args:
+        cmd: The command to run.
+        cwd: Working directory.
+        timeout_sec: Timeout for the command.
+
+    Returns:
+        A tuple of (exit_code, stdout, stderr).
+    """
+    p = subprocess.run(
+        cmd,
+        cwd=cwd,
+        shell=True,
+        text=True,
+        capture_output=True,
+        timeout=timeout_sec,
+    )
+    return p.returncode, p.stdout, p.stderr
+
+
+def create_sandbox() -> Sandbox:
+    """Create a new disposable sandbox directory.
+
+    Returns:
+        A Sandbox object with paths configured.
+    """
+    root = os.path.join(tempfile.gettempdir(), f"rfsn_sb_{uuid.uuid4().hex[:10]}")
+    os.makedirs(root, exist_ok=True)
+    repo_dir = os.path.join(root, "repo")
+    return Sandbox(root=root, repo_dir=repo_dir)
+
+
+def destroy_sandbox(sb: Sandbox) -> None:
+    """Recursively delete the sandbox directory."""
+    if os.path.exists(sb.root):
+        shutil.rmtree(sb.root, ignore_errors=True)
+
+
+def clone_public_github(sb: Sandbox, github_url: str) -> Dict[str, Any]:
+    """Clone a public GitHub repository into the sandbox.
+
+    This enforces that only public GitHub URLs are accepted and that no
+    credentials or query parameters are allowed. If the repo is already
+    cloned, it returns a note instead of re-cloning.
+
+    Args:
+        sb: The sandbox into which the repo should be cloned.
+        github_url: The public GitHub URL of the repository.
+
+    Returns:
+        A dictionary indicating success and any stdout/stderr.
+    """
+    # public-only enforcement
+    if not github_url.startswith("https://github.com/"):
+        return {"ok": False, "error": "Only public GitHub https://github.com/OWNER/REPO URLs allowed."}
+    # Block credentials but allow valid query params for GitHub
+    if "@" in github_url or "token" in github_url.lower():
+        return {"ok": False, "error": "No credentials allowed."}
+    # Block query params that might contain tokens
+    parsed = github_url.split("?")
+    if len(parsed) > 1:
+        query_part = parsed[1].lower()
+        if "token" in query_part or "access_token" in query_part or "password" in query_part:
+            return {"ok": False, "error": "No credentials allowed in query params."}
+
+    os.makedirs(sb.repo_dir, exist_ok=True)
+    # clone into empty dir
+    if os.path.exists(os.path.join(sb.repo_dir, ".git")):
+        return {"ok": True, "note": "Repo already cloned."}
+
+    parent = os.path.dirname(sb.repo_dir)
+    code, out, err = _run(f"git clone {github_url} {sb.repo_dir}", cwd=parent, timeout_sec=600)
+    return {"ok": code == 0, "exit_code": code, "stdout": out, "stderr": err}
+
+
+def checkout(sb: Sandbox, ref: str) -> Dict[str, Any]:
+    """Check out a specific git ref inside the sandboxed repository."""
+    code, out, err = _run(f"git checkout {ref}", cwd=sb.repo_dir, timeout_sec=120)
+    return {"ok": code == 0, "exit_code": code, "stdout": out, "stderr": err}
+
+
+def git_status(sb: Sandbox) -> Dict[str, Any]:
+    """Get a porcelain status of the repository."""
+    code, out, err = _run("git status --porcelain=v1", cwd=sb.repo_dir, timeout_sec=60)
+    return {"ok": code == 0, "exit_code": code, "stdout": out, "stderr": err}
+
+
+def reset_hard(sb: Sandbox) -> Dict[str, Any]:
+    """Reset any changes and clean untracked files in the repository."""
+    c1, o1, e1 = _run("git reset --hard", cwd=sb.repo_dir, timeout_sec=120)
+    c2, o2, e2 = _run("git clean -fd", cwd=sb.repo_dir, timeout_sec=120)
+    ok = (c1 == 0 and c2 == 0)
+    return {"ok": ok, "stdout": o1 + o2, "stderr": e1 + e2}
+
+
+def list_tree(sb: Sandbox, max_files: int = 400) -> Dict[str, Any]:
+    """Return a flattened list of files in the repository, pruning junk directories."""
+    files: List[str] = []
+    for root, dirs, fnames in os.walk(sb.repo_dir):
+        rel_root = os.path.relpath(root, sb.repo_dir).replace("\\", "/")
+        if rel_root.startswith(".git"):
+            continue
+        # prune common junk
+        dirs[:] = [d for d in dirs if d not in [".git", "node_modules", ".venv", "venv", "__pycache__"]]
+        for f in fnames:
+            rel = os.path.normpath(os.path.join(rel_root, f)).replace("\\", "/")
+            if rel.startswith(".git/"):
+                continue
+            files.append(rel.lstrip("./"))
+            if len(files) >= max_files:
+                files.sort()
+                return {"ok": True, "files": files}
+    files.sort()
+    return {"ok": True, "files": files}
+
+
+def read_file(sb: Sandbox, path: str, max_bytes: int = 120_000) -> Dict[str, Any]:
+    """Read a file from the repository, returning its text truncated to max_bytes."""
+    path = path.lstrip("./").replace("\\", "/")
+    full = os.path.join(sb.repo_dir, path)
+    # ensure path remains under repo_dir
+    if not os.path.abspath(full).startswith(os.path.abspath(sb.repo_dir)):
+        return {"ok": False, "error": "Path escape blocked."}
+    if not os.path.exists(full) or not os.path.isfile(full):
+        return {"ok": False, "error": "File not found."}
+    with open(full, "rb") as f:
+        data = f.read(max_bytes + 1)
+    truncated = len(data) > max_bytes
+    if truncated:
+        data = data[:max_bytes]
+    text = data.decode("utf-8", errors="replace")
+    return {"ok": True, "path": path, "text": text, "truncated": truncated}
+
+
+def grep(sb: Sandbox, query: str, max_matches: int = 200) -> Dict[str, Any]:
+    """Search recursively for a text query in the repository using grep."""
+    query = query.replace("\n", " ")
+    # Escape single quotes in query for shell safety
+    query_escaped = query.replace("'", "'\\''")
+    code, out, err = _run(f"grep -R --line-number '{query_escaped}' .", cwd=sb.repo_dir, timeout_sec=60)
+    lines = (out + err).splitlines()[:max_matches]
+    return {"ok": True, "matches": lines}
+
+
+def run_cmd(sb: Sandbox, cmd: str, timeout_sec: int = 120) -> Dict[str, Any]:
+    """Run an arbitrary shell command inside the repository."""
+    code, out, err = _run(cmd, cwd=sb.repo_dir, timeout_sec=timeout_sec)
+    return {"ok": code == 0, "exit_code": code, "stdout": out, "stderr": err}
+
+
+def apply_patch(sb: Sandbox, diff: str) -> Dict[str, Any]:
+    """Apply a unified diff directly to the repository."""
+    p = subprocess.run(
+        "git apply -",
+        cwd=sb.repo_dir,
+        shell=True,
+        text=True,
+        input=diff,
+        capture_output=True,
+        timeout=60,
+    )
+    ok = p.returncode == 0
+    return {
+        "ok": ok,
+        "exit_code": p.returncode,
+        "stdout": p.stdout,
+        "stderr": p.stderr,
+    }
+
+
+def make_worktree(sb: Sandbox) -> str:
+    """Create a detached worktree for testing candidate patches."""
+    wt = os.path.join(sb.root, f"wt_{uuid.uuid4().hex[:10]}")
+    # Escape path for shell safety
+    wt_escaped = shlex.quote(wt)
+    code, out, err = _run(
+        f"git worktree add --detach {wt_escaped}",
+        cwd=sb.repo_dir,
+        timeout_sec=60,
+    )
+    if code != 0:
+        raise RuntimeError(f"worktree add failed: {err}\n{out}")
+    return wt
+
+
+def drop_worktree(sb: Sandbox, wt_dir: str) -> None:
+    """Remove a detached worktree."""
+    wt_escaped = shlex.quote(wt_dir)
+    _run(
+        f"git worktree remove --force {wt_escaped}",
+        cwd=sb.repo_dir,
+        timeout_sec=60,
+    )
+    if os.path.exists(wt_dir):
+        shutil.rmtree(wt_dir, ignore_errors=True)
+
+
+def apply_patch_in_dir(wt_dir: str, diff: str) -> Dict[str, Any]:
+    """Apply a unified diff inside a specific worktree."""
+    p = subprocess.run(
+        "git apply -",
+        cwd=wt_dir,
+        shell=True,
+        text=True,
+        input=diff,
+        capture_output=True,
+        timeout=60,
+    )
+    ok = p.returncode == 0
+    return {
+        "ok": ok,
+        "exit_code": p.returncode,
+        "stdout": p.stdout,
+        "stderr": p.stderr,
+    }
