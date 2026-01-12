@@ -14,7 +14,7 @@ def build_model_input(state: Dict[str, Any]) -> str:
     """Build a formatted model input string from the controller state.
 
     The state dictionary should contain keys: goal, intent, subgoal, test_cmd,
-    focus_test_cmd, failure_output, repo_tree, constraints, files_block.
+    focus_test_cmd, failure_output, repo_tree, constraints, files_block, observations.
 
     Args:
         state: A mapping of context fields to embed in the prompt.
@@ -22,14 +22,20 @@ def build_model_input(state: Dict[str, Any]) -> str:
     Returns:
         A single string with sections separated by headers.
     """
-    return (
-        f"GOAL:\n{state['goal']}\n\n"
-        f"INTENT:\n{state['intent']}\n\n"
-        f"SUBGOAL:\n{state['subgoal']}\n\n"
-        f"TEST_COMMAND:\n{state['test_cmd']}\n\n"
-        f"FOCUS_TEST_COMMAND:\n{state['focus_test_cmd']}\n\n"
-        f"FAILURE_OUTPUT:\n{_truncate(state['failure_output'], 45000)}\n\n"
-        f"REPO_TREE:\n{_truncate(state['repo_tree'], 20000)}\n\n"
-        f"CONSTRAINTS:\n{state['constraints']}\n\n"
-        f"FILES:\n{state['files_block']}\n"
-    )
+    sections = [
+        f"GOAL:\n{state['goal']}\n\n",
+        f"INTENT:\n{state['intent']}\n\n",
+        f"SUBGOAL:\n{state['subgoal']}\n\n",
+        f"TEST_COMMAND:\n{state['test_cmd']}\n\n",
+        f"FOCUS_TEST_COMMAND:\n{state['focus_test_cmd']}\n\n",
+        f"FAILURE_OUTPUT:\n{_truncate(state['failure_output'], 45000)}\n\n",
+        f"REPO_TREE:\n{_truncate(state['repo_tree'], 20000)}\n\n",
+        f"CONSTRAINTS:\n{state['constraints']}\n\n",
+        f"FILES:\n{state['files_block']}\n",
+    ]
+    
+    # Add observations if present
+    if state.get('observations'):
+        sections.append(f"\nOBSERVATIONS:\n{_truncate(state['observations'], 30000)}")
+    
+    return "".join(sections)

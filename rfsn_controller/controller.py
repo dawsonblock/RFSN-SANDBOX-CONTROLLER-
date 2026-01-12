@@ -235,6 +235,9 @@ def run_controller(cfg: ControllerConfig) -> Dict[str, Any]:
     sb = create_sandbox()
     log_dir = sb.root  # write logs next to sandbox for inspection
     bad_hashes: set[str] = set()
+    observations: str = ""  # buffer for tool results to feed back to model
+    sig_history: list[str] = []  # track error signatures for stall detection
+    patch_attempts: int = 0  # count patch attempts to detect lack of progress
 
     try:
         write_jsonl(log_dir, {"phase": "init", "cfg": cfg.__dict__})
@@ -272,8 +275,25 @@ def run_controller(cfg: ControllerConfig) -> Dict[str, Any]:
             if v.ok:
                 return {"ok": True, "sandbox": sb.root, "repo_dir": sb.repo_dir}
 
+            # Track signature for stall detection
+            sig_history.append(v.sig)
+            if len(sig_history) > 5:
+                sig_history.pop(0)
+
+            # Detect stall: same sig repeats 3 times OR no progress after 3 patches
+            is_stalled = (
+                sig_history.count(v.sig) >= 3 or
+                (patch_attempts >= 3 and len(v.failing_tests) > 0)
+            )
+
             # controller policy
             pd = choose_policy(cfg.test_cmd, v)
+
+            # If stalled, force evidence gathering
+            if is_stalled:
+                pd.intent = "gather_evidence"
+                pd.subgoal = "Collect more context: list_tree, grep for error symbols, read new files"
+                write_jsonl(log_dir, {"phase": "stall_detected", "step": step, "sig": v.sig, "patch_attempts": patch_attempts})
 
             # gather high-signal files
             if is_quixbugs:
@@ -293,6 +313,7 @@ def run_controller(cfg: ControllerConfig) -> Dict[str, Any]:
                 "repo_tree": repo_tree_text,
                 "constraints": _constraints_text(),
                 "files_block": files_block,
+                "observations": observations,
             }
             model_input = build_model_input(state)
 
@@ -307,11 +328,39 @@ def run_controller(cfg: ControllerConfig) -> Dict[str, Any]:
                 if mode == "tool_request":
                     # execute requested tools; then continue to next iteration
                     tool_results = []
+                    obs_additions = []
                     for req in (resp.get("requests") or [])[:6]:
                         tool = req.get("tool", "")
                         args = req.get("args", {}) if isinstance(req.get("args"), dict) else {}
                         tr = _execute_tool(sb, tool, args)
                         tool_results.append({"tool": tool, "args": args, "result": tr})
+                        
+                        # Summarize for observations
+                        summary = f"Tool: {tool}\n"
+                        summary += f"Args: {args}\n"
+                        summary += f"Exit: {tr.get('exit_code', 'N/A')}\n"
+                        stdout = tr.get("stdout", "")[:500]
+                        stderr = tr.get("stderr", "")[:500]
+                        if stdout:
+                            summary += f"Stdout: {stdout}\n"
+                        if stderr:
+                            summary += f"Stderr: {stderr}\n"
+                        if tool == "sandbox.read_file" and tr.get("ok"):
+                            summary += "[File content read successfully]\n"
+                        if tool == "sandbox.grep" and tr.get("ok"):
+                            matches = tr.get("matches", [])
+                            if matches:
+                                summary += f"Found {len(matches)} matches\n"
+                        if tool == "sandbox.list_tree" and tr.get("ok"):
+                            files = tr.get("files", [])
+                            if files:
+                                summary += f"Listed {len(files)} files\n"
+                        obs_additions.append(summary)
+                    
+                    # Append to observations buffer
+                    if obs_additions:
+                        observations += "\n".join(obs_additions) + "\n"
+                    
                     write_jsonl(log_dir, {"phase": "tools_executed", "step": step, "tool_results": tool_results})
                     # after tool requests we do not patch; re-measure on next loop
                     break
@@ -328,6 +377,8 @@ def run_controller(cfg: ControllerConfig) -> Dict[str, Any]:
                 results = evaluate_patches_parallel(
                     sb, patches_to_evaluate, pd.focus_test_cmd, cfg.test_cmd, max_workers=3
                 )
+                # Increment patch attempts counter
+                patch_attempts += len(patches_to_evaluate)
                 # Log all results
                 for res in results:
                     write_jsonl(log_dir, {
