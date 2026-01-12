@@ -39,6 +39,17 @@ def main() -> None:
         action="store_true",
         help="Continue fixing bugs until all tests pass (no max steps limit)",
     )
+    parser.add_argument(
+        "--max-steps-without-progress",
+        type=int,
+        default=10,
+        help="Early termination if no progress after N steps (default: 10)",
+    )
+    parser.add_argument(
+        "--collect-finetuning-data",
+        action="store_true",
+        help="Collect successful patches for model fine-tuning",
+    )
     args = parser.parse_args()
 
     cfg = ControllerConfig(
@@ -47,6 +58,8 @@ def main() -> None:
         ref=args.ref,
         max_steps=args.steps,
         fix_all=args.fix_all,
+        max_steps_without_progress=args.max_steps_without_progress,
+        collect_finetuning_data=args.collect_finetuning_data,
     )
     result = run_controller(cfg)
     print(result)
