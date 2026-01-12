@@ -147,22 +147,25 @@ def _collect_relevant_files_quixbugs(sb: Sandbox, v: VerifyResult, repo_tree: st
     - python_programs/<program>.py (implementation files)
 
     Strategy:
-    1. Always include the failing test file
+    1. Always include the first failing test file (highest priority)
     2. Map test file to corresponding program file
     3. Include any traceback-referenced files
+    4. Add common helper files if referenced
     """
     out: List[Dict[str, Any]] = []
 
     if not v.failing_tests:
         return out
 
-    # Get the failing test file path
+    # Get the first failing test file (highest priority)
     test_path = normalize_test_path(v.failing_tests[0])
     if not _safe_path(test_path):
         return out
 
-    # 1. Include the failing test file
-    out.append(read_file(sb, test_path, max_bytes=120000))
+    # 1. Include the failing test file (highest priority)
+    test_content = read_file(sb, test_path, max_bytes=120000)
+    if test_content.get("ok"):
+        out.append(test_content)
 
     # 2. Map test file to program file
     # python_testcases/test_quicksort.py -> python_programs/quicksort.py
@@ -172,7 +175,9 @@ def _collect_relevant_files_quixbugs(sb: Sandbox, v: VerifyResult, repo_tree: st
             program_name = test_filename[5:-3]  # quicksort
             program_path = f"python_programs/{program_name}.py"
             if _safe_path(program_path):
-                out.append(read_file(sb, program_path, max_bytes=120000))
+                program_content = read_file(sb, program_path, max_bytes=120000)
+                if program_content.get("ok"):
+                    out.append(program_content)
 
     # 3. Include traceback-referenced files
     combined = (v.stdout or "") + "\n" + (v.stderr or "")
@@ -183,7 +188,9 @@ def _collect_relevant_files_quixbugs(sb: Sandbox, v: VerifyResult, repo_tree: st
         if p2.endswith(".py") and _safe_path(p2):
             # Avoid duplicates
             if not any(f.get("path") == p2 for f in out):
-                out.append(read_file(sb, p2, max_bytes=120000))
+                file_content = read_file(sb, p2, max_bytes=120000)
+                if file_content.get("ok"):
+                    out.append(file_content)
 
     return out
 
@@ -221,6 +228,8 @@ class ControllerConfig:
     max_steps: int = 12
     temps: List[float] = field(default_factory=lambda: [0.0, 0.2, 0.4])
     fix_all: bool = False  # Continue until all tests pass
+    max_steps_without_progress: int = 10  # Early termination if no progress
+    collect_finetuning_data: bool = False  # Collect successful patches for fine-tuning
 
 
 def run_controller(cfg: ControllerConfig) -> Dict[str, Any]:
@@ -239,6 +248,9 @@ def run_controller(cfg: ControllerConfig) -> Dict[str, Any]:
     observations: str = ""  # buffer for tool results to feed back to model
     sig_history: list[str] = []  # track error signatures for stall detection
     patch_attempts: int = 0  # count patch attempts to detect lack of progress
+    steps_without_progress: int = 0  # track steps without reducing failing tests
+    min_failing_tests: int = 999999  # track minimum failing tests seen
+    distinct_sigs: set[str] = set()  # track distinct error signatures for multi-bug detection
 
     try:
         write_jsonl(log_dir, {"phase": "init", "cfg": cfg.__dict__})
@@ -267,8 +279,11 @@ def run_controller(cfg: ControllerConfig) -> Dict[str, Any]:
         step = 0
 
         while step < max_iterations:
+            # Progress reporting
+            print(f"\n[Step {step}] Running tests...")
             # measure
             v = run_tests(sb, cfg.test_cmd, timeout_sec=180)
+            print(f"[Step {step}] Tests: {'PASS' if v.ok else 'FAIL'} | Failing: {len(v.failing_tests)} tests")
             write_jsonl(log_dir, {
                 "phase": "measure",
                 "step": step,
@@ -278,6 +293,7 @@ def run_controller(cfg: ControllerConfig) -> Dict[str, Any]:
                 "sig": v.sig,
             })
             if v.ok:
+                print(f"\n✅ SUCCESS! All tests passing after {step} steps.")
                 return {
                     "ok": True,
                     "sandbox": sb.root,
@@ -286,10 +302,37 @@ def run_controller(cfg: ControllerConfig) -> Dict[str, Any]:
                     "fix_all": cfg.fix_all,
                 }
 
+            # Track progress for early termination
+            current_failing = len(v.failing_tests)
+            if current_failing < min_failing_tests:
+                min_failing_tests = current_failing
+                steps_without_progress = 0
+            else:
+                steps_without_progress += 1
+
+            # Early termination: no progress after N steps
+            if steps_without_progress >= cfg.max_steps_without_progress:
+                print(f"\n❌ Early termination: No progress for {steps_without_progress} steps")
+                print(f"   Minimum failing tests: {min_failing_tests}, Current: {current_failing}")
+                return {
+                    "ok": False,
+                    "error": "no_progress",
+                    "sandbox": sb.root,
+                    "repo_dir": sb.repo_dir,
+                    "steps_taken": step,
+                    "min_failing_tests": min_failing_tests,
+                    "current_failing_tests": current_failing,
+                }
+
             # Track signature for stall detection
             sig_history.append(v.sig)
             if len(sig_history) > 5:
                 sig_history.pop(0)
+
+            # Track distinct signatures for multi-bug detection
+            distinct_sigs.add(v.sig)
+            if len(distinct_sigs) > 1:
+                print(f"[Step {step}] 🐛 Multi-bug detected: {len(distinct_sigs)} distinct error signatures")
 
             # Detect stall: same sig repeats 3 times OR no progress after 3 patches
             is_stalled = (
@@ -299,12 +342,14 @@ def run_controller(cfg: ControllerConfig) -> Dict[str, Any]:
 
             # controller policy
             pd = choose_policy(cfg.test_cmd, v)
+            print(f"[Step {step}] Intent: {pd.intent} | Subgoal: {pd.subgoal[:60]}...")
 
             # If stalled, force evidence gathering
             if is_stalled:
                 pd.intent = "gather_evidence"
                 pd.subgoal = "Collect more context: list_tree, grep for error symbols, read new files"
                 write_jsonl(log_dir, {"phase": "stall_detected", "step": step, "sig": v.sig, "patch_attempts": patch_attempts})
+                print(f"[Step {step}] ⚠️  Stall detected - switching to evidence gathering")
 
             # gather high-signal files
             if is_quixbugs:
@@ -368,9 +413,17 @@ def run_controller(cfg: ControllerConfig) -> Dict[str, Any]:
                                 summary += f"Listed {len(files)} files\n"
                         obs_additions.append(summary)
                     
-                    # Append to observations buffer
+                    # Append to observations buffer with sliding window
                     if obs_additions:
-                        observations += "\n".join(obs_additions) + "\n"
+                        new_obs = "\n".join(obs_additions) + "\n"
+                        # Sliding window: keep only last 50,000 characters of observations
+                        # This prioritizes recent tool results over older context
+                        if len(observations) + len(new_obs) > 50000:
+                            # Keep the most recent 50,000 characters
+                            combined = observations + new_obs
+                            observations = combined[-50000:]
+                        else:
+                            observations += new_obs
                     
                     write_jsonl(log_dir, {"phase": "tools_executed", "step": step, "tool_results": tool_results})
                     # after tool requests we do not patch; re-measure on next loop
@@ -419,6 +472,25 @@ def run_controller(cfg: ControllerConfig) -> Dict[str, Any]:
                 bad_hashes.add(_diff_hash(winner))
                 reset_hard(sb)
                 continue
+            
+            # Collect fine-tuning data if enabled
+            if cfg.collect_finetuning_data:
+                finetuning_entry = {
+                    "phase": "finetuning_data",
+                    "step": step,
+                    "github_url": cfg.github_url,
+                    "test_cmd": cfg.test_cmd,
+                    "failure_output": (v.stdout or "") + "\n" + (v.stderr or ""),
+                    "failing_tests": v.failing_tests,
+                    "error_signature": v.sig,
+                    "intent": pd.intent,
+                    "subgoal": pd.subgoal,
+                    "successful_patch": winner,
+                    "patch_hash": _diff_hash(winner),
+                    "files_used": [f.get("path") for f in files if f.get("ok")],
+                }
+                write_jsonl(log_dir, finetuning_entry)
+            
             # after applying, loop continues; controller will re-measure
 
             # Increment step counter
