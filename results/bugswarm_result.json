@@ -1,0 +1,1 @@
+{"test": "bugswarm", "repo": "https://github.com/BugSwarm/bugswarm", "test_cmd": "pytest -q", "result": {"ok": false, "error": "max_steps_reached", "sandbox": "/var/folders/xt/jh84t2kj6hl26tk5qx3m_28h0000gn/T/rfsn_sb_462bad131d", "repo_dir": "/var/folders/xt/jh84t2kj6hl26tk5qx3m_28h0000gn/T/rfsn_sb_462bad131d/repo"}, "timestamp": "2026-01-12T17:35:00Z"}

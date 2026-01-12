@@ -34,6 +34,11 @@ def main() -> None:
         default=12,
         help="Maximum controller steps before giving up",
     )
+    parser.add_argument(
+        "--fix-all",
+        action="store_true",
+        help="Continue fixing bugs until all tests pass (no max steps limit)",
+    )
     args = parser.parse_args()
 
     cfg = ControllerConfig(
@@ -41,6 +46,7 @@ def main() -> None:
         test_cmd=args.test,
         ref=args.ref,
         max_steps=args.steps,
+        fix_all=args.fix_all,
     )
     result = run_controller(cfg)
     print(result)

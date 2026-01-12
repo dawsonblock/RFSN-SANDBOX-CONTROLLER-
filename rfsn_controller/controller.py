@@ -220,6 +220,7 @@ class ControllerConfig:
     ref: Optional[str] = None
     max_steps: int = 12
     temps: List[float] = field(default_factory=lambda: [0.0, 0.2, 0.4])
+    fix_all: bool = False  # Continue until all tests pass
 
 
 def run_controller(cfg: ControllerConfig) -> Dict[str, Any]:
@@ -261,7 +262,11 @@ def run_controller(cfg: ControllerConfig) -> Dict[str, Any]:
         # Detect QuixBugs repository structure
         is_quixbugs = "python_testcases/" in repo_tree_text and "python_programs/" in repo_tree_text
 
-        for step in range(cfg.max_steps):
+        # If fix_all mode, use unlimited steps
+        max_iterations = float('inf') if cfg.fix_all else cfg.max_steps
+        step = 0
+
+        while step < max_iterations:
             # measure
             v = run_tests(sb, cfg.test_cmd, timeout_sec=180)
             write_jsonl(log_dir, {
@@ -273,7 +278,13 @@ def run_controller(cfg: ControllerConfig) -> Dict[str, Any]:
                 "sig": v.sig,
             })
             if v.ok:
-                return {"ok": True, "sandbox": sb.root, "repo_dir": sb.repo_dir}
+                return {
+                    "ok": True,
+                    "sandbox": sb.root,
+                    "repo_dir": sb.repo_dir,
+                    "steps_taken": step,
+                    "fix_all": cfg.fix_all,
+                }
 
             # Track signature for stall detection
             sig_history.append(v.sig)
@@ -363,6 +374,7 @@ def run_controller(cfg: ControllerConfig) -> Dict[str, Any]:
                     
                     write_jsonl(log_dir, {"phase": "tools_executed", "step": step, "tool_results": tool_results})
                     # after tool requests we do not patch; re-measure on next loop
+                    step += 1
                     break
 
                 if mode == "patch":
@@ -409,11 +421,16 @@ def run_controller(cfg: ControllerConfig) -> Dict[str, Any]:
                 continue
             # after applying, loop continues; controller will re-measure
 
+            # Increment step counter
+            step += 1
+
         return {
             "ok": False,
             "error": "max_steps_reached",
             "sandbox": sb.root,
             "repo_dir": sb.repo_dir,
+            "steps_taken": step,
+            "fix_all": cfg.fix_all,
         }
     finally:
         # Note: sandbox is not destroyed automatically for inspection. Uncomment to auto-clean.
