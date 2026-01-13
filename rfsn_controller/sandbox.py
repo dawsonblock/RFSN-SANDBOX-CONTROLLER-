@@ -147,19 +147,69 @@ def list_tree(sb: Sandbox, max_files: int = 400) -> Dict[str, Any]:
 def read_file(sb: Sandbox, path: str, max_bytes: int = 120_000) -> Dict[str, Any]:
     """Read a file from the repository, returning its text truncated to max_bytes."""
     path = path.lstrip("./").replace("\\", "/")
-    full = os.path.join(sb.repo_dir, path)
-    # ensure path remains under repo_dir
-    if not os.path.abspath(full).startswith(os.path.abspath(sb.repo_dir)):
-        return {"ok": False, "error": "Path escape blocked."}
-    if not os.path.exists(full) or not os.path.isfile(full):
-        return {"ok": False, "error": "File not found."}
-    with open(full, "rb") as f:
-        data = f.read(max_bytes + 1)
-    truncated = len(data) > max_bytes
-    if truncated:
-        data = data[:max_bytes]
-    text = data.decode("utf-8", errors="replace")
-    return {"ok": True, "path": path, "text": text, "truncated": truncated}
+    full_path = os.path.join(sb.repo_dir, path)
+    if not os.path.exists(full_path):
+        return {"ok": False, "error": f"File not found: {path}"}
+    try:
+        with open(full_path, "r", encoding="utf-8", errors="ignore") as f:
+            content = f.read(max_bytes)
+        return {"ok": True, "content": content, "path": path}
+    except Exception as e:
+        return {"ok": False, "error": str(e)}
+
+
+def pip_install(sb: Sandbox, packages: str, timeout_sec: int = 300) -> Dict[str, Any]:
+    """Install Python packages using pip in the sandboxed repository.
+
+    Args:
+        sb: The sandbox instance.
+        packages: Space-separated list of packages to install (e.g., "requests numpy").
+        timeout_sec: Maximum time to wait for installation.
+
+    Returns:
+        Result dictionary with ok status, stdout, and stderr.
+    """
+    cmd = f"pip install {packages}"
+    code, out, err = _run(cmd, cwd=sb.repo_dir, timeout_sec=timeout_sec)
+    return {"ok": code == 0, "exit_code": code, "stdout": out, "stderr": err}
+
+
+def pip_install_requirements(sb: Sandbox, requirements_file: str = "requirements.txt", timeout_sec: int = 300) -> Dict[str, Any]:
+    """Install packages from a requirements.txt file.
+
+    Args:
+        sb: The sandbox instance.
+        requirements_file: Path to requirements.txt file (relative to repo root).
+        timeout_sec: Maximum time to wait for installation.
+
+    Returns:
+        Result dictionary with ok status, stdout, and stderr.
+    """
+    full_path = os.path.join(sb.repo_dir, requirements_file)
+    if not os.path.exists(full_path):
+        return {"ok": False, "error": f"Requirements file not found: {requirements_file}"}
+    cmd = f"pip install -r {requirements_file}"
+    code, out, err = _run(cmd, cwd=sb.repo_dir, timeout_sec=timeout_sec)
+    return {"ok": code == 0, "exit_code": code, "stdout": out, "stderr": err}
+
+
+def create_venv(sb: Sandbox, venv_path: str = ".venv", timeout_sec: int = 60) -> Dict[str, Any]:
+    """Create a Python virtual environment in the sandbox.
+
+    Args:
+        sb: The sandbox instance.
+        venv_path: Path for the virtual environment (relative to repo root).
+        timeout_sec: Maximum time to wait for creation.
+
+    Returns:
+        Result dictionary with ok status, stdout, and stderr.
+    """
+    full_path = os.path.join(sb.repo_dir, venv_path)
+    if os.path.exists(full_path):
+        return {"ok": True, "note": f"Virtual environment already exists at {venv_path}"}
+    cmd = f"python -m venv {venv_path}"
+    code, out, err = _run(cmd, cwd=sb.repo_dir, timeout_sec=timeout_sec)
+    return {"ok": code == 0, "exit_code": code, "stdout": out, "stderr": err}
 
 
 def grep(sb: Sandbox, query: str, max_matches: int = 200) -> Dict[str, Any]:

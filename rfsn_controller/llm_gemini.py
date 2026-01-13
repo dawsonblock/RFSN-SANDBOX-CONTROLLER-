@@ -18,6 +18,20 @@ You must output exactly one JSON object of one of these forms:
 2) Patch:
 { "mode":"patch", "diff":"<unified diff>" }
 
+Available sandbox tools:
+- sandbox.clone_repo: Clone a public GitHub repository
+- sandbox.checkout: Check out a specific git ref
+- sandbox.run: Run a shell command
+- sandbox.read_file: Read a file from the repository
+- sandbox.grep: Search for text in files
+- sandbox.list_tree: List all files in the repository
+- sandbox.apply_patch: Apply a git diff patch
+- sandbox.git_status: Get git status
+- sandbox.reset_hard: Reset repository to clean state
+- sandbox.pip_install: Install Python packages (args: {"packages": "package1 package2"})
+- sandbox.pip_install_requirements: Install from requirements.txt (args: {"requirements_file": "path/to/requirements.txt"})
+- sandbox.create_venv: Create a virtual environment (args: {"venv_path": ".venv"})
+
 Rules:
 - Public GitHub only. No tokens. No credentials.
 - If patch mode, diff must apply with git apply from repo root.
@@ -26,6 +40,8 @@ Rules:
 - Always edit implementation files, NEVER edit test files.
 - For QuixBugs-style repos: edit python_programs/*.py, NOT python_testcases/*.py.
 - Focus on fixing the bug in the implementation, not changing tests.
+- For dependency issues: use sandbox.pip_install or sandbox.pip_install_requirements
+- For environment setup: use sandbox.create_venv before installing packages
 """.strip()
 
 
@@ -48,6 +64,9 @@ REQUEST_ITEM = types.Schema(
                 "max_matches": types.Schema(type=types.Type.INTEGER),
                 "max_files": types.Schema(type=types.Type.INTEGER),
                 "timeout_sec": types.Schema(type=types.Type.INTEGER),
+                "packages": types.Schema(type=types.Type.STRING),
+                "requirements_file": types.Schema(type=types.Type.STRING),
+                "venv_path": types.Schema(type=types.Type.STRING),
             },
         ),
     },

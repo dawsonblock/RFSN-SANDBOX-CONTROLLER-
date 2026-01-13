@@ -29,6 +29,9 @@ from .sandbox import (
     make_worktree,
     drop_worktree,
     apply_patch_in_dir,
+    pip_install,
+    pip_install_requirements,
+    create_venv,
 )
 from .verifier import run_tests, VerifyResult
 from .policy import choose_policy
@@ -111,6 +114,24 @@ def _execute_tool(sb: Sandbox, tool: str, args: Dict[str, Any]) -> Dict[str, Any
         return git_status(sb)
     if tool == "sandbox.reset_hard":
         return reset_hard(sb)
+    if tool == "sandbox.pip_install":
+        try:
+            timeout = int(args.get("timeout_sec", 300))
+        except (ValueError, TypeError):
+            timeout = 300
+        return pip_install(sb, args.get("packages", ""), timeout_sec=timeout)
+    if tool == "sandbox.pip_install_requirements":
+        try:
+            timeout = int(args.get("timeout_sec", 300))
+        except (ValueError, TypeError):
+            timeout = 300
+        return pip_install_requirements(sb, args.get("requirements_file", "requirements.txt"), timeout_sec=timeout)
+    if tool == "sandbox.create_venv":
+        try:
+            timeout = int(args.get("timeout_sec", 60))
+        except (ValueError, TypeError):
+            timeout = 60
+        return create_venv(sb, args.get("venv_path", ".venv"), timeout_sec=timeout)
     return {"ok": False, "error": f"Tool not allowed: {tool}"}
 
 
@@ -268,7 +289,7 @@ def run_controller(cfg: ControllerConfig) -> Dict[str, Any]:
                 return {"ok": False, "error": co.get("stderr")}
 
         reset_hard(sb)
-        tree = list_tree(sb, max_files=400)
+        tree = list_tree(sb, max_files=2000)
         repo_tree_text = "\n".join(tree.get("files", [])) if tree.get("ok") else ""
 
         # Detect QuixBugs repository structure
