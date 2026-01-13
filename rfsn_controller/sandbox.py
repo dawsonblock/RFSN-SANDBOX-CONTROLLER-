@@ -21,6 +21,16 @@ from .command_allowlist import is_command_allowed
 
 
 @dataclass
+class DockerResult:
+    """Result from a Docker command execution."""
+    ok: bool
+    exit_code: int
+    stdout: str
+    stderr: str
+    timed_out: bool = False
+
+
+@dataclass
 class Sandbox:
     """A disposable workspace for running git operations."""
 
@@ -423,3 +433,118 @@ def apply_patch_in_dir(wt_dir: str, diff: str) -> Dict[str, Any]:
         "stdout": p.stdout,
         "stderr": p.stderr,
     }
+
+
+def docker_run(
+    sb: Sandbox,
+    cmd: str,
+    timeout_sec: int = 120,
+    network: bool = True,
+    docker_image: str = "python:3.11-slim",
+) -> DockerResult:
+    """Run a command inside a Docker container with the repo mounted.
+
+    Args:
+        sb: The sandbox containing the repo.
+        cmd: The command to run inside the container.
+        timeout_sec: Timeout for the command.
+        network: Whether to enable network (True) or disable (False).
+        docker_image: Docker image to use.
+
+    Returns:
+        DockerResult with execution status and output.
+    """
+    try:
+        # Build docker run command
+        docker_cmd = [
+            "docker", "run", "--rm",
+            "-v", f"{sb.repo_dir}:/repo",
+            "-w", "/repo",
+        ]
+
+        # Network control
+        if not network:
+            docker_cmd.append("--network=none")
+
+        docker_cmd.extend([docker_image, "sh", "-c", cmd])
+
+        # Run docker command
+        p = subprocess.run(
+            docker_cmd,
+            shell=False,
+            text=True,
+            capture_output=True,
+            timeout=timeout_sec,
+        )
+
+        return DockerResult(
+            ok=p.returncode == 0,
+            exit_code=p.returncode,
+            stdout=p.stdout,
+            stderr=p.stderr,
+            timed_out=False,
+        )
+    except subprocess.TimeoutExpired:
+        return DockerResult(
+            ok=False,
+            exit_code=-1,
+            stdout="",
+            stderr=f"Command timed out after {timeout_sec}s",
+            timed_out=True,
+        )
+    except FileNotFoundError:
+        return DockerResult(
+            ok=False,
+            exit_code=-1,
+            stdout="",
+            stderr="Docker not found. Please install Docker.",
+            timed_out=False,
+        )
+    except Exception as e:
+        return DockerResult(
+            ok=False,
+            exit_code=-1,
+            stdout="",
+            stderr=f"Docker execution error: {e}",
+            timed_out=False,
+        )
+
+
+def docker_install(
+    sb: Sandbox,
+    cmd: str,
+    timeout_sec: int = 300,
+    docker_image: str = "python:3.11-slim",
+) -> DockerResult:
+    """Run a dependency installation command with network enabled.
+
+    Args:
+        sb: The sandbox containing the repo.
+        cmd: The install command to run.
+        timeout_sec: Timeout for installation.
+        docker_image: Docker image to use.
+
+    Returns:
+        DockerResult with installation status and output.
+    """
+    return docker_run(sb, cmd, timeout_sec=timeout_sec, network=True, docker_image=docker_image)
+
+
+def docker_test(
+    sb: Sandbox,
+    cmd: str,
+    timeout_sec: int = 180,
+    docker_image: str = "python:3.11-slim",
+) -> DockerResult:
+    """Run a test command with network disabled.
+
+    Args:
+        sb: The sandbox containing the repo.
+        cmd: The test command to run.
+        timeout_sec: Timeout for tests.
+        docker_image: Docker image to use.
+
+    Returns:
+        DockerResult with test status and output.
+    """
+    return docker_run(sb, cmd, timeout_sec=timeout_sec, network=False, docker_image=docker_image)
