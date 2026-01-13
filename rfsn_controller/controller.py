@@ -280,6 +280,14 @@ class ControllerConfig:
     max_tool_calls: int = 40  # Maximum total tool calls per run
     docker_image: str = "python:3.11-slim"  # Docker image for sandboxed execution
     unsafe_host_exec: bool = False  # Allow running commands on host instead of Docker
+    cpu: float = 2.0  # Docker CPU limit
+    mem_mb: int = 4096  # Docker memory limit in MB
+    pids: int = 256  # Docker process ID limit
+    docker_readonly: bool = False  # Mount repo as read-only with /tmp as tmpfs
+    lint_cmd: Optional[str] = None  # Lint command for verification
+    typecheck_cmd: Optional[str] = None  # Typecheck command for verification
+    repro_cmd: Optional[str] = None  # Repro command for verification
+    dry_run: bool = False  # Clone + detect + setup + baseline, then exit
 
 
 def run_controller(cfg: ControllerConfig) -> Dict[str, Any]:

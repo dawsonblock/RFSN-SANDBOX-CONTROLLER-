@@ -441,6 +441,10 @@ def docker_run(
     timeout_sec: int = 120,
     network: bool = True,
     docker_image: str = "python:3.11-slim",
+    cpu: float = 2.0,
+    mem_mb: int = 4096,
+    pids: int = 256,
+    read_only: bool = False,
 ) -> DockerResult:
     """Run a command inside a Docker container with the repo mounted.
 
@@ -450,6 +454,10 @@ def docker_run(
         timeout_sec: Timeout for the command.
         network: Whether to enable network (True) or disable (False).
         docker_image: Docker image to use.
+        cpu: CPU limit (e.g., 2.0 for 2 CPUs).
+        mem_mb: Memory limit in MB.
+        pids: Process ID limit.
+        read_only: Whether to mount repo as read-only with /tmp as tmpfs.
 
     Returns:
         DockerResult with execution status and output.
@@ -462,9 +470,30 @@ def docker_run(
             "-w", "/repo",
         ]
 
+        # Resource limits
+        docker_cmd.extend([
+            f"--cpus={cpu}",
+            f"--memory={mem_mb}m",
+            f"--pids-limit={pids}",
+        ])
+
+        # Read-only mode with tmpfs
+        if read_only:
+            docker_cmd.append("--read-only")
+            docker_cmd.append("--tmpfs=/tmp:rw,noexec,nosuid,size=512m")
+
         # Network control
         if not network:
             docker_cmd.append("--network=none")
+
+        # Environment variables
+        docker_cmd.extend([
+            "-e", "TZ=UTC",
+            "-e", "PYTHONHASHSEED=0",
+            "-e", "PIP_DISABLE_PIP_VERSION_CHECK=1",
+            "-e", "PIP_NO_CACHE_DIR=1",
+            "-e", "LC_ALL=C.UTF-8",
+        ])
 
         docker_cmd.extend([docker_image, "sh", "-c", cmd])
 
@@ -515,6 +544,10 @@ def docker_install(
     cmd: str,
     timeout_sec: int = 300,
     docker_image: str = "python:3.11-slim",
+    cpu: float = 2.0,
+    mem_mb: int = 4096,
+    pids: int = 256,
+    read_only: bool = False,
 ) -> DockerResult:
     """Run a dependency installation command with network enabled.
 
@@ -523,18 +556,29 @@ def docker_install(
         cmd: The install command to run.
         timeout_sec: Timeout for installation.
         docker_image: Docker image to use.
+        cpu: CPU limit.
+        mem_mb: Memory limit in MB.
+        pids: Process ID limit.
+        read_only: Whether to mount repo as read-only.
 
     Returns:
         DockerResult with installation status and output.
     """
-    return docker_run(sb, cmd, timeout_sec=timeout_sec, network=True, docker_image=docker_image)
+    return docker_run(
+        sb, cmd, timeout_sec=timeout_sec, network=True, docker_image=docker_image,
+        cpu=cpu, mem_mb=mem_mb, pids=pids, read_only=read_only
+    )
 
 
 def docker_test(
     sb: Sandbox,
     cmd: str,
-    timeout_sec: int = 180,
+    timeout_sec: int = 120,
     docker_image: str = "python:3.11-slim",
+    cpu: float = 2.0,
+    mem_mb: int = 4096,
+    pids: int = 256,
+    read_only: bool = False,
 ) -> DockerResult:
     """Run a test command with network disabled.
 
@@ -543,8 +587,15 @@ def docker_test(
         cmd: The test command to run.
         timeout_sec: Timeout for tests.
         docker_image: Docker image to use.
+        cpu: CPU limit.
+        mem_mb: Memory limit in MB.
+        pids: Process ID limit.
+        read_only: Whether to mount repo as read-only.
 
     Returns:
         DockerResult with test status and output.
     """
-    return docker_run(sb, cmd, timeout_sec=timeout_sec, network=False, docker_image=docker_image)
+    return docker_run(
+        sb, cmd, timeout_sec=timeout_sec, network=False, docker_image=docker_image,
+        cpu=cpu, mem_mb=mem_mb, pids=pids, read_only=read_only
+    )

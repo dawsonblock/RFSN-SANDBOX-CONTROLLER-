@@ -1,9 +1,17 @@
-"""Test runner integration for the RFSN controller."""
+"""Test runner integration for the RFSN controller.
 
+Implements multi-predicate goal verification:
+- Tests (required)
+- Lint (optional)
+- Typecheck (optional)
+- Repro (optional)
+"""
+
+import os
 from dataclasses import dataclass, field
-from typing import List
+from typing import List, Optional, Dict
 
-from .sandbox import Sandbox, run_cmd
+from .sandbox import Sandbox, run_cmd, docker_test
 from .parsers import parse_pytest_failures, error_signature
 
 
@@ -17,6 +25,221 @@ class VerifyResult:
     stderr: str
     failing_tests: List[str] = field(default_factory=list)
     sig: str = ""
+    predicate_name: str = "tests"  # Name of the verification predicate
+
+
+@dataclass
+class VerifySummary:
+    """Summary of all verification checks."""
+
+    all_passed: bool
+    results: List[VerifyResult]
+    total_checks: int
+    passed_checks: int
+    failed_checks: int
+
+
+class Verifier:
+    """Multi-predicate verifier for goal validation."""
+
+    def __init__(
+        self,
+        sb: Sandbox,
+        test_cmd: str,
+        lint_cmd: Optional[str] = None,
+        typecheck_cmd: Optional[str] = None,
+        repro_cmd: Optional[str] = None,
+        docker_image: str = "python:3.11-slim",
+        cpu: float = 2.0,
+        mem_mb: int = 4096,
+        pids: int = 256,
+        read_only: bool = False,
+        use_docker: bool = False,
+    ):
+        """Initialize the verifier.
+
+        Args:
+            sb: The sandbox containing the repo.
+            test_cmd: Test command (required).
+            lint_cmd: Lint command (optional).
+            typecheck_cmd: Typecheck command (optional).
+            repro_cmd: Repro command (optional).
+            docker_image: Docker image to use.
+            cpu: CPU limit.
+            mem_mb: Memory limit in MB.
+            pids: Process ID limit.
+            read_only: Whether to mount repo as read-only.
+            use_docker: Whether to use Docker for verification.
+        """
+        self.sb = sb
+        self.test_cmd = test_cmd
+        self.lint_cmd = lint_cmd
+        self.typecheck_cmd = typecheck_cmd
+        self.repro_cmd = repro_cmd
+        self.docker_image = docker_image
+        self.cpu = cpu
+        self.mem_mb = mem_mb
+        self.pids = pids
+        self.read_only = read_only
+        self.use_docker = use_docker
+
+    def verify_all(
+        self,
+        timeout_sec: int = 120,
+        focus_test_file: Optional[str] = None,
+    ) -> VerifySummary:
+        """Run all enabled verification predicates in order (fast-to-slow).
+
+        Verification order:
+        1. Focus test (if provided)
+        2. Full tests
+        3. Repro (if enabled)
+        4. Lint (if enabled)
+        5. Typecheck (if enabled)
+
+        Args:
+            timeout_sec: Timeout for each verification step.
+            focus_test_file: Specific test file to run first.
+
+        Returns:
+            VerifySummary with all results.
+        """
+        results = []
+
+        # 1. Focus test (fastest)
+        if focus_test_file:
+            focus_cmd = f"pytest -q {focus_test_file}"
+            result = self._run_verify(focus_cmd, "focus_test", timeout_sec)
+            results.append(result)
+            if not result.ok:
+                # Focus test failed, skip remaining checks
+                return VerifySummary(
+                    all_passed=False,
+                    results=results,
+                    total_checks=len(results),
+                    passed_checks=sum(1 for r in results if r.ok),
+                    failed_checks=sum(1 for r in results if not r.ok),
+                )
+
+        # 2. Full tests (required)
+        result = self._run_verify(self.test_cmd, "tests", timeout_sec)
+        results.append(result)
+        if not result.ok:
+            # Tests failed, skip optional checks
+            return VerifySummary(
+                all_passed=False,
+                results=results,
+                total_checks=len(results),
+                passed_checks=sum(1 for r in results if r.ok),
+                failed_checks=sum(1 for r in results if not r.ok),
+            )
+
+        # 3. Repro (optional)
+        if self.repro_cmd:
+            result = self._run_verify(self.repro_cmd, "repro", timeout_sec)
+            results.append(result)
+            if not result.ok:
+                return VerifySummary(
+                    all_passed=False,
+                    results=results,
+                    total_checks=len(results),
+                    passed_checks=sum(1 for r in results if r.ok),
+                    failed_checks=sum(1 for r in results if not r.ok),
+                )
+
+        # 4. Lint (optional)
+        if self.lint_cmd:
+            result = self._run_verify(self.lint_cmd, "lint", timeout_sec)
+            results.append(result)
+            if not result.ok:
+                return VerifySummary(
+                    all_passed=False,
+                    results=results,
+                    total_checks=len(results),
+                    passed_checks=sum(1 for r in results if r.ok),
+                    failed_checks=sum(1 for r in results if not r.ok),
+                )
+
+        # 5. Typecheck (optional)
+        if self.typecheck_cmd:
+            result = self._run_verify(self.typecheck_cmd, "typecheck", timeout_sec)
+            results.append(result)
+            if not result.ok:
+                return VerifySummary(
+                    all_passed=False,
+                    results=results,
+                    total_checks=len(results),
+                    passed_checks=sum(1 for r in results if r.ok),
+                    failed_checks=sum(1 for r in results if not r.ok),
+                )
+
+        # All checks passed
+        return VerifySummary(
+            all_passed=True,
+            results=results,
+            total_checks=len(results),
+            passed_checks=len(results),
+            failed_checks=0,
+        )
+
+    def _run_verify(
+        self,
+        cmd: str,
+        predicate_name: str,
+        timeout_sec: int,
+    ) -> VerifyResult:
+        """Run a single verification predicate.
+
+        Args:
+            cmd: Command to run.
+            predicate_name: Name of the predicate.
+            timeout_sec: Timeout for the command.
+
+        Returns:
+            VerifyResult with execution status.
+        """
+        if self.use_docker:
+            docker_result = docker_test(
+                self.sb,
+                cmd,
+                timeout_sec=timeout_sec,
+                docker_image=self.docker_image,
+                cpu=self.cpu,
+                mem_mb=self.mem_mb,
+                pids=self.pids,
+                read_only=self.read_only,
+            )
+            stdout = docker_result.stdout
+            stderr = docker_result.stderr
+            exit_code = docker_result.exit_code
+            ok = docker_result.ok
+        else:
+            r = run_cmd(self.sb, cmd, timeout_sec=timeout_sec)
+            stdout = r.get("stdout") or ""
+            stderr = r.get("stderr") or ""
+            try:
+                exit_code = int(r.get("exit_code") or 1)
+            except (ValueError, TypeError):
+                exit_code = 1
+            ok = bool(r.get("ok"))
+
+        # Parse test failures and signature for test predicates
+        failing_tests = []
+        sig = ""
+        if predicate_name in ["tests", "focus_test"]:
+            out = stdout + stderr
+            failing_tests = parse_pytest_failures(out)
+            sig = error_signature(stdout, stderr)
+
+        return VerifyResult(
+            ok=ok,
+            exit_code=exit_code,
+            stdout=stdout,
+            stderr=stderr,
+            failing_tests=failing_tests,
+            sig=sig,
+            predicate_name=predicate_name,
+        )
 
 
 def run_tests(sb: Sandbox, test_cmd: str, timeout_sec: int = 120) -> VerifyResult:
@@ -46,3 +269,47 @@ def run_tests(sb: Sandbox, test_cmd: str, timeout_sec: int = 120) -> VerifyResul
         failing_tests=fails,
         sig=sig,
     )
+
+
+def get_default_python_commands(
+    repo_dir: str,
+) -> Dict[str, Optional[str]]:
+    """Get default verification commands for Python projects.
+
+    Args:
+        repo_dir: Path to the repository.
+
+    Returns:
+        Dict with keys: test, lint, typecheck, repro.
+    """
+    commands = {
+        "test": "pytest -q",
+        "lint": None,
+        "typecheck": None,
+        "repro": None,
+    }
+
+    # Check for ruff (lint)
+    if os.path.exists(os.path.join(repo_dir, "pyproject.toml")):
+        try:
+            with open(os.path.join(repo_dir, "pyproject.toml")) as f:
+                content = f.read()
+                if "ruff" in content.lower():
+                    commands["lint"] = "ruff check ."
+        except Exception:
+            pass
+
+    # Check for mypy (typecheck)
+    if os.path.exists(os.path.join(repo_dir, "pyproject.toml")):
+        try:
+            with open(os.path.join(repo_dir, "pyproject.toml")) as f:
+                content = f.read()
+                if "mypy" in content.lower():
+                    commands["typecheck"] = "mypy ."
+        except Exception:
+            pass
+
+    # Default repro command (run tests twice to check for flakiness)
+    commands["repro"] = "pytest -q --repeat=2" if commands["test"] else None
+
+    return commands

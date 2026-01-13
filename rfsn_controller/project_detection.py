@@ -5,18 +5,111 @@ appropriate setup and test commands.
 """
 
 import os
-from typing import Optional, List, Tuple
+from typing import Optional, List
 from dataclasses import dataclass
 
 
 @dataclass
 class ProjectType:
     """Detected project type with setup and test commands."""
-    
+
     name: str
     setup_commands: List[str]
     test_commands: List[str]
     language: str
+
+
+@dataclass
+class InstallResult:
+    """Result of an installation attempt."""
+
+    success: bool
+    command: str
+    output: str
+    error: str
+    failure_reason: Optional[str] = None
+
+
+def classify_install_failure(stderr: str) -> str:
+    """Classify installation failure type.
+
+    Args:
+        stderr: Error output from installation.
+
+    Returns:
+        Failure reason string.
+    """
+    if not stderr:
+        return "unknown"
+
+    stderr_lower = stderr.lower()
+
+    # Check for system library issues
+    if any(x in stderr_lower for x in ["command not found", "no such file", "cannot find -l", "library not found"]):
+        return "missing_system_libs"
+
+    # Check for Python version mismatch
+    if any(x in stderr_lower for x in ["python_requires", "requires python", "not supported", "version"]):
+        return "python_version_mismatch"
+
+    # Check for pip resolution issues
+    if any(x in stderr_lower for x in ["resolutionerror", "dependency conflict", "could not find"]):
+        return "pip_resolution_error"
+
+    # Check for network issues
+    if any(x in stderr_lower for x in ["connection refused", "timeout", "network", "ssl"]):
+        return "network_error"
+
+    # Check for permission issues
+    if any(x in stderr_lower for x in ["permission denied", "access denied", "eacces"]):
+        return "permission_error"
+
+    return "unknown"
+
+
+def get_python_install_ladder(repo_dir: str) -> List[str]:
+    """Get install command ladder for Python projects.
+
+    Ladder policy:
+    1. Always: python -m pip install -U pip setuptools wheel
+    2. If pyproject.toml: python -m pip install -e .
+    3. If requirements.txt: python -m pip install -r requirements.txt
+    4. If both exist: try editable first, then requirements.
+    5. If setup.py: python -m pip install -e .
+
+    Args:
+        repo_dir: Path to the repository.
+
+    Returns:
+        List of install commands to try in order.
+    """
+    commands = []
+
+    # Always upgrade pip, setuptools, wheel first
+    commands.append("python -m pip install -U pip setuptools wheel")
+
+    has_pyproject = os.path.exists(os.path.join(repo_dir, "pyproject.toml"))
+    has_setup_py = os.path.exists(os.path.join(repo_dir, "setup.py"))
+    has_requirements = os.path.exists(os.path.join(repo_dir, "requirements.txt"))
+    has_pipfile = os.path.exists(os.path.join(repo_dir, "Pipfile"))
+    has_poetry = os.path.exists(os.path.join(repo_dir, "poetry.lock"))
+
+    # If both pyproject.toml and requirements.txt exist, try editable first
+    if has_pyproject and has_requirements:
+        commands.append("python -m pip install -e .")
+        commands.append("python -m pip install -r requirements.txt")
+    elif has_pyproject:
+        commands.append("python -m pip install -e .")
+    elif has_setup_py:
+        commands.append("python -m pip install -e .")
+    elif has_requirements:
+        commands.append("python -m pip install -r requirements.txt")
+    elif has_pipfile:
+        commands.append("pipenv install --dev")
+    elif has_poetry:
+        commands.append("poetry install")
+
+    return commands
 
 
 def detect_project_type(repo_dir: str) -> Optional[ProjectType]:
@@ -58,28 +151,16 @@ def _detect_python_project(repo_dir: str) -> Optional[ProjectType]:
     has_requirements = os.path.exists(os.path.join(repo_dir, "requirements.txt"))
     has_pipfile = os.path.exists(os.path.join(repo_dir, "Pipfile"))
     has_poetry = os.path.exists(os.path.join(repo_dir, "poetry.lock"))
-    
+
     if not (has_pyproject or has_setup_py or has_requirements or has_pipfile or has_poetry):
         return None
-    
-    setup_commands = []
-    
-    # Determine setup command
-    if has_pyproject:
-        setup_commands.append("pip install -e .")
-    elif has_setup_py:
-        setup_commands.append("pip install -e .")
-    
-    if has_requirements:
-        setup_commands.append("pip install -r requirements.txt")
-    elif has_pipfile:
-        setup_commands.append("pipenv install")
-    elif has_poetry:
-        setup_commands.append("poetry install")
-    
+
+    # Use install ladder for setup commands
+    setup_commands = get_python_install_ladder(repo_dir)
+
     # Determine test command
     test_commands = []
-    
+
     # Check for pytest
     if os.path.exists(os.path.join(repo_dir, "pytest.ini")) or \
        os.path.exists(os.path.join(repo_dir, "pyproject.toml")) or \
@@ -88,7 +169,7 @@ def _detect_python_project(repo_dir: str) -> Optional[ProjectType]:
     else:
         # Default to pytest
         test_commands.append("pytest -q")
-    
+
     return ProjectType(
         name="python",
         setup_commands=setup_commands,

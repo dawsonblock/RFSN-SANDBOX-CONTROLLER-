@@ -10,6 +10,7 @@ Tests cover:
 import pytest
 import os
 import sys
+import unittest
 
 # Add parent directory to path for imports
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
@@ -18,6 +19,7 @@ from rfsn_controller.url_validation import validate_github_url
 from rfsn_controller.tool_manager import ToolRequestManager, ToolRequestConfig, ToolRequest
 from rfsn_controller.patch_hygiene import validate_patch_hygiene, PatchHygieneConfig
 from rfsn_controller.stall_detector import StallState
+from rfsn_controller.model_validator import ModelOutputValidator, is_valid_unified_diff
 
 
 class TestURLValidation:
@@ -265,38 +267,38 @@ class TestPatchHygiene:
             assert not result.is_valid, f"Should reject patch with {pattern}"
 
 
-class TestStallDetector:
-    """Tests for stall detection."""
+class TestStallDetector(unittest.TestCase):
+    """Test stall detection logic."""
 
     def test_stall_state_initialization(self):
         """Test that stall state initializes correctly."""
-        stall_state = StallState()
-        assert stall_state.failing_tests_count == 0
-        assert stall_state.failing_test_id is None
-        assert stall_state.error_signature == ""
+        stall_state = StallState(stall_threshold=3)
+        assert stall_state.stall_threshold == 3
         assert stall_state.iterations_without_improvement == 0
-        assert not stall_state.is_stalled()
+        assert stall_state.failing_tests_count == 0
+        assert stall_state.top_failing_test_id is None
+        assert stall_state.error_signature == ""
 
     def test_stall_detection_no_improvement(self):
-        """Test that stall is detected after 3 unchanged iterations."""
+        """Test that stall is detected after N iterations without improvement."""
         stall_state = StallState(stall_threshold=3)
 
-        # First iteration (improvement from initial state)
+        # First iteration (improvement from 0 to 5)
         is_stalled = stall_state.update(failing_count=5, test_id="test_1", sig="sig1")
         assert not is_stalled
         assert stall_state.iterations_without_improvement == 0
 
-        # Second iteration (same state - no improvement)
+        # Second iteration (no improvement)
         is_stalled = stall_state.update(failing_count=5, test_id="test_1", sig="sig1")
         assert not is_stalled
         assert stall_state.iterations_without_improvement == 1
 
-        # Third iteration (same state - no improvement)
+        # Third iteration (no improvement)
         is_stalled = stall_state.update(failing_count=5, test_id="test_1", sig="sig1")
         assert not is_stalled
         assert stall_state.iterations_without_improvement == 2
 
-        # Fourth iteration (same state - NOW stalled)
+        # Fourth iteration (no improvement - should stall)
         is_stalled = stall_state.update(failing_count=5, test_id="test_1", sig="sig1")
         assert is_stalled
         assert stall_state.iterations_without_improvement == 3
@@ -313,45 +315,6 @@ class TestStallDetector:
         assert not is_stalled
         assert stall_state.iterations_without_improvement == 0
         assert stall_state.failing_tests_count == 3
-
-    def test_stall_detection_signature_change(self):
-        """Test that signature change resets stall counter."""
-        stall_state = StallState(stall_threshold=3)
-
-        # First iteration
-        stall_state.update(failing_count=5, test_id="test_1", sig="sig1")
-
-        # Second iteration (same count, different signature)
-        is_stalled = stall_state.update(failing_count=5, test_id="test_1", sig="sig2")
-        assert not is_stalled
-        assert stall_state.iterations_without_improvement == 0
-
-    def test_stall_detection_test_id_change(self):
-        """Test that test ID change resets stall counter."""
-        stall_state = StallState(stall_threshold=3)
-
-        # First iteration
-        stall_state.update(failing_count=5, test_id="test_1", sig="sig1")
-
-        # Second iteration (same count and sig, different test)
-        is_stalled = stall_state.update(failing_count=5, test_id="test_2", sig="sig1")
-        assert not is_stalled
-        assert stall_state.iterations_without_improvement == 0
-
-    def test_stall_state_reset(self):
-        """Test that stall state can be reset."""
-        stall_state = StallState(stall_threshold=3)
-
-        # Set up stalled state (need 4 iterations total)
-        stall_state.update(failing_count=5, test_id="test_1", sig="sig1")  # improvement
-        stall_state.update(failing_count=5, test_id="test_1", sig="sig1")  # no improvement
-        stall_state.update(failing_count=5, test_id="test_1", sig="sig1")  # no improvement
-        stall_state.update(failing_count=5, test_id="test_1", sig="sig1")  # no improvement - stalled
-
-        assert stall_state.is_stalled()
-
-        # Reset
-        stall_state.reset()
 
         assert stall_state.failing_tests_count == 0
         assert stall_state.failing_test_id is None

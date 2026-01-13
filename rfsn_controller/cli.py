@@ -96,6 +96,49 @@ def main() -> None:
         action="store_true",
         help="Allow running commands on host instead of Docker (DANGEROUS, not recommended)",
     )
+    parser.add_argument(
+        "--cpu",
+        type=float,
+        default=2.0,
+        help="Docker CPU limit (default: 2.0)",
+    )
+    parser.add_argument(
+        "--mem-mb",
+        type=int,
+        default=4096,
+        help="Docker memory limit in MB (default: 4096)",
+    )
+    parser.add_argument(
+        "--pids",
+        type=int,
+        default=256,
+        help="Docker process ID limit (default: 256)",
+    )
+    parser.add_argument(
+        "--docker-readonly",
+        action="store_true",
+        help="Mount repo as read-only with /tmp as tmpfs (more secure)",
+    )
+    parser.add_argument(
+        "--lint-cmd",
+        default=None,
+        help="Lint command for verification (e.g., 'ruff check .')",
+    )
+    parser.add_argument(
+        "--typecheck-cmd",
+        default=None,
+        help="Typecheck command for verification (e.g., 'mypy .')",
+    )
+    parser.add_argument(
+        "--repro-cmd",
+        default=None,
+        help="Repro command for verification (e.g., 'pytest -q --repeat=2')",
+    )
+    parser.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="Clone + detect + setup + baseline test, then exit (no repair loop)",
+    )
     args = parser.parse_args()
 
     cfg = ControllerConfig(
@@ -114,6 +157,14 @@ def main() -> None:
         max_tool_calls=args.max_tool_calls,
         docker_image=args.docker_image,
         unsafe_host_exec=args.unsafe_host_exec,
+        cpu=args.cpu,
+        mem_mb=args.mem_mb,
+        pids=args.pids,
+        docker_readonly=args.docker_readonly,
+        lint_cmd=args.lint_cmd,
+        typecheck_cmd=args.typecheck_cmd,
+        repro_cmd=args.repro_cmd,
+        dry_run=args.dry_run,
     )
     result = run_controller(cfg)
     print(result)
