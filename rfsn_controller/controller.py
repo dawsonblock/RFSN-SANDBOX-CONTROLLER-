@@ -44,7 +44,8 @@ from .tool_manager import ToolRequestManager, ToolRequestConfig
 from .verifier import run_tests, VerifyResult
 from .policy import choose_policy
 from .prompt import build_model_input
-from .llm_gemini import call_model
+from .llm_gemini import call_model as call_gemini
+from .llm_deepseek import call_model as call_deepseek
 from .parsers import normalize_test_path, parse_trace_files
 from .log import write_jsonl
 from .parallel import evaluate_patches_parallel, find_first_successful_patch
@@ -60,6 +61,14 @@ from .apt_whitelist import AptWhitelist, AptTier
 from .sysdeps_installer import SysdepsInstaller
 from .setup_report import SetupReport, create_setup_report
 from .test_detector import TestDetector
+
+
+def get_model_client(model_name: str):
+    """Get the appropriate model client based on model name."""
+    if model_name.startswith("deepseek"):
+        return call_deepseek
+    else:
+        return call_gemini
 from .buildpacks import (
     get_all_buildpacks,
     BuildpackContext,
@@ -284,7 +293,7 @@ class ControllerConfig:
     fix_all: bool = False
     max_steps_without_progress: int = 10
     collect_finetuning_data: bool = False
-    model: str = "gemini-3.0-flash-exp"
+    model: str = "deepseek-r1"
     max_minutes: int = 30
     install_timeout: int = 300
     focus_timeout: int = 120
@@ -825,6 +834,7 @@ def run_controller(cfg: ControllerConfig) -> Dict[str, Any]:
             # ask model (try multiple temps for diversity)
             winner: Optional[str] = None
             patches_to_evaluate = []
+            call_model = get_model_client(cfg.model)
             for t in cfg.temps:
                 resp = call_model(model_input, temperature=t)
                 write_jsonl(log_dir, {"phase": "model", "step": step, "temp": t, "resp": resp})
