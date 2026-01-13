@@ -17,6 +17,8 @@ from dataclasses import dataclass
 from typing import Dict, Any, Tuple, List
 import shlex
 
+from .command_allowlist import is_command_allowed
+
 
 @dataclass
 class Sandbox:
@@ -37,6 +39,11 @@ def _run(cmd: str, cwd: str, timeout_sec: int = 120) -> Tuple[int, str, str]:
     Returns:
         A tuple of (exit_code, stdout, stderr).
     """
+    # Check if command is allowed
+    is_allowed, reason = is_command_allowed(cmd)
+    if not is_allowed:
+        return 1, "", f"Command blocked by security policy: {reason}"
+
     p = subprocess.run(
         cmd,
         cwd=cwd,
@@ -169,7 +176,10 @@ def pip_install(sb: Sandbox, packages: str, timeout_sec: int = 300) -> Dict[str,
     Returns:
         Result dictionary with ok status, stdout, and stderr.
     """
-    cmd = f"pip install {packages}"
+    # Use venv pip if available, otherwise system pip
+    venv_pip = os.path.join(sb.repo_dir, ".venv", "bin", "pip")
+    pip_cmd = venv_pip if os.path.exists(venv_pip) else "pip"
+    cmd = f"{pip_cmd} install {packages}"
     code, out, err = _run(cmd, cwd=sb.repo_dir, timeout_sec=timeout_sec)
     return {"ok": code == 0, "exit_code": code, "stdout": out, "stderr": err}
 
@@ -188,7 +198,10 @@ def pip_install_requirements(sb: Sandbox, requirements_file: str = "requirements
     full_path = os.path.join(sb.repo_dir, requirements_file)
     if not os.path.exists(full_path):
         return {"ok": False, "error": f"Requirements file not found: {requirements_file}"}
-    cmd = f"pip install -r {requirements_file}"
+    # Use venv pip if available, otherwise system pip
+    venv_pip = os.path.join(sb.repo_dir, ".venv", "bin", "pip")
+    pip_cmd = venv_pip if os.path.exists(venv_pip) else "pip"
+    cmd = f"{pip_cmd} install -r {requirements_file}"
     code, out, err = _run(cmd, cwd=sb.repo_dir, timeout_sec=timeout_sec)
     return {"ok": code == 0, "exit_code": code, "stdout": out, "stderr": err}
 
@@ -227,13 +240,17 @@ def pip_install_progressive(sb: Sandbox, packages: str, timeout_sec: int = 300) 
         Result with overall status, successful packages, failed packages,
         and detailed results for each package.
     """
+    # Use venv pip if available, otherwise system pip
+    venv_pip = os.path.join(sb.repo_dir, ".venv", "bin", "pip")
+    pip_cmd = venv_pip if os.path.exists(venv_pip) else "pip"
+
     package_list = packages.split()
     results = []
     successful = []
     failed = []
 
     for pkg in package_list:
-        cmd = f"pip install {pkg}"
+        cmd = f"{pip_cmd} install {pkg}"
         code, out, err = _run(cmd, cwd=sb.repo_dir, timeout_sec=timeout_sec)
         pkg_result = {
             "package": pkg,

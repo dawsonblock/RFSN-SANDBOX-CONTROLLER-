@@ -1,0 +1,53 @@
+version: '3.8'
+
+services:
+  rfsn:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: rfsn-controller
+    environment:
+      - GEMINI_API_KEY=${GEMINI_API_KEY}
+      - PYTHONUNBUFFERED=1
+      - RFSN_SANDBOX_BASE=/sandbox
+    volumes:
+      - /tmp/rfsn-results:/app/results
+      - /tmp/rfsn-sandbox:/sandbox
+    working_dir: /app
+    command: python -m rfsn_controller.cli --help
+    stdin_open: true
+    tty: true
+
+  rfsn-quixbugs:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: rfsn-quixbugs
+    environment:
+      - GEMINI_API_KEY=${GEMINI_API_KEY}
+      - PYTHONUNBUFFERED=1
+      - RFSN_SANDBOX_BASE=/sandbox
+    volumes:
+      - /tmp/rfsn-results:/app/results
+      - /tmp/rfsn-sandbox:/sandbox
+    working_dir: /app
+    command: python -m rfsn_controller.cli --repo "https://github.com/jkoppel/QuixBugs" --test "pytest -q python_testcases/test_quicksort.py" --max-steps 5
+    stdin_open: true
+    tty: true
+
+  rfsn-bugswarm:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: rfsn-bugswarm
+    environment:
+      - GEMINI_API_KEY=${GEMINI_API_KEY}
+      - PYTHONUNBUFFERED=1
+      - RFSN_SANDBOX_BASE=/sandbox
+    volumes:
+      - /tmp/rfsn-results:/app/results
+      - /tmp/rfsn-sandbox:/sandbox
+    working_dir: /app
+    command: python -m rfsn_controller.cli --repo "https://github.com/BugSwarm/bugswarm" --test "pytest -q" --max-steps 10
+    stdin_open: true
+    tty: true
