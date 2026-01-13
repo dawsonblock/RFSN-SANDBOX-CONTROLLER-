@@ -30,7 +30,10 @@ Available sandbox tools:
 - sandbox.reset_hard: Reset repository to clean state
 - sandbox.pip_install: Install Python packages (args: {"packages": "package1 package2"})
 - sandbox.pip_install_requirements: Install from requirements.txt (args: {"requirements_file": "path/to/requirements.txt"})
+- sandbox.pip_install_progressive: Install packages one at a time, continuing on failures (args: {"packages": "package1 package2"})
 - sandbox.create_venv: Create a virtual environment (args: {"venv_path": ".venv"})
+- sandbox.find_local_module: Search for local module in repository (args: {"module_name": "module_name"})
+- sandbox.set_pythonpath: Set PYTHONPATH for imports (args: {"path": "path/to/add"})
 
 WORKFLOW EXAMPLES:
 
@@ -38,8 +41,9 @@ Example 1 - Single Project with Missing Dependencies:
 1. Tests fail with ModuleNotFoundError or ImportError
 2. Use sandbox.list_tree to find requirements.txt or setup.py
 3. Use sandbox.pip_install_requirements to install dependencies
-4. Re-run tests to verify installation
-5. If tests still fail due to bugs, proceed to patch mode
+4. If pip install fails, use sandbox.pip_install_progressive to install available packages
+5. Re-run tests to verify installation
+6. If tests still fail due to bugs, proceed to patch mode
 
 Example 2 - Multi-Project Repository:
 1. Use sandbox.list_tree to see full repository structure
@@ -48,7 +52,21 @@ Example 2 - Multi-Project Repository:
 4. Run tests in each sub-project separately
 5. Fix bugs in implementation files, not test files
 
-Example 3 - QuixBugs-Style Repository:
+Example 3 - Local Module Not Found:
+1. Tests fail with ImportError for a module that doesn't exist on PyPI
+2. Use sandbox.find_local_module({"module_name": "missing_module"})
+3. If found, use sandbox.set_pythonpath to add repo to PYTHONPATH
+4. Re-run tests to verify module is accessible
+5. If still failing, proceed to patch mode
+
+Example 4 - Unavailable Packages:
+1. sandbox.pip_install fails with "No matching distribution found"
+2. Use sandbox.pip_install_progressive to install packages one at a time
+3. Review results to see which packages succeeded/failed
+4. For failed packages, try alternative names or check if they're local modules
+5. Proceed with available packages and re-run tests
+
+Example 5 - QuixBugs-Style Repository:
 1. Repository has python_programs/ and python_testcases/ directories
 2. Tests fail with assertion errors (logic bugs)
 3. Read failing test file to understand expected behavior
@@ -135,6 +153,7 @@ REQUEST_ITEM = types.Schema(
                 "packages": types.Schema(type=types.Type.STRING),
                 "requirements_file": types.Schema(type=types.Type.STRING),
                 "venv_path": types.Schema(type=types.Type.STRING),
+                "module_name": types.Schema(type=types.Type.STRING),
             },
         ),
     },

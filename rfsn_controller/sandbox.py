@@ -212,6 +212,112 @@ def create_venv(sb: Sandbox, venv_path: str = ".venv", timeout_sec: int = 60) ->
     return {"ok": code == 0, "exit_code": code, "stdout": out, "stderr": err}
 
 
+def pip_install_progressive(sb: Sandbox, packages: str, timeout_sec: int = 300) -> Dict[str, Any]:
+    """Install Python packages one at a time, continuing on failures.
+
+    This progressive installation strategy allows partial success when some
+    packages are unavailable or fail to install.
+
+    Args:
+        sb: The sandbox instance.
+        packages: Space-separated list of packages to install.
+        timeout_sec: Maximum time per package installation.
+
+    Returns:
+        Result with overall status, successful packages, failed packages,
+        and detailed results for each package.
+    """
+    package_list = packages.split()
+    results = []
+    successful = []
+    failed = []
+
+    for pkg in package_list:
+        cmd = f"pip install {pkg}"
+        code, out, err = _run(cmd, cwd=sb.repo_dir, timeout_sec=timeout_sec)
+        pkg_result = {
+            "package": pkg,
+            "ok": code == 0,
+            "exit_code": code,
+            "stdout": out,
+            "stderr": err
+        }
+        results.append(pkg_result)
+        if code == 0:
+            successful.append(pkg)
+        else:
+            failed.append(pkg)
+
+    return {
+        "ok": len(failed) == 0,
+        "successful_packages": successful,
+        "failed_packages": failed,
+        "total_packages": len(package_list),
+        "results": results
+    }
+
+
+def find_local_module(sb: Sandbox, module_name: str) -> Dict[str, Any]:
+    """Search for a local module in the repository.
+
+    This helps identify when a "missing" import is actually a local module
+    that needs to be added to PYTHONPATH.
+
+    Args:
+        sb: The sandbox instance.
+        module_name: Name of the module to search for.
+
+    Returns:
+        Result with found paths and PYTHONPATH suggestion.
+    """
+    module_variations = [
+        module_name,
+        module_name.replace("-", "_"),
+        module_name.replace("_", "-"),
+        f"{module_name}.py",
+        f"{module_name}/__init__.py"
+    ]
+
+    found_paths = []
+    for variation in module_variations:
+        code, out, err = _run(f"find . -name '{variation}' -type f 2>/dev/null", cwd=sb.repo_dir, timeout_sec=30)
+        if code == 0 and out.strip():
+            for line in out.strip().splitlines():
+                if line and not line.startswith("."):
+                    found_paths.append(line.lstrip("./"))
+
+    return {
+        "ok": len(found_paths) > 0,
+        "module_name": module_name,
+        "found_paths": found_paths,
+        "pythonpath_suggestion": f"export PYTHONPATH={sb.repo_dir}:$PYTHONPATH" if found_paths else None
+    }
+
+
+def set_pythonpath(sb: Sandbox, path: str = "") -> Dict[str, Any]:
+    """Set PYTHONPATH for the sandbox environment.
+
+    Note: This sets PYTHONPATH for subsequent commands in the same session.
+
+    Args:
+        sb: The sandbox instance.
+        path: Path to add to PYTHONPATH (default: repo root).
+
+    Returns:
+        Result with status and the PYTHONPATH value.
+    """
+    if not path:
+        path = sb.repo_dir
+    cmd = f"export PYTHONPATH={path}:$PYTHONPATH && echo $PYTHONPATH"
+    code, out, err = _run(cmd, cwd=sb.repo_dir, timeout_sec=10)
+    return {
+        "ok": code == 0,
+        "pythonpath": out.strip() if code == 0 else path,
+        "stdout": out,
+        "stderr": err
+    }
+
+
 def grep(sb: Sandbox, query: str, max_matches: int = 200) -> Dict[str, Any]:
     """Search recursively for a text query in the repository using grep."""
     query = query.replace("\n", " ")

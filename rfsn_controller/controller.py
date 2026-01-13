@@ -31,7 +31,10 @@ from .sandbox import (
     apply_patch_in_dir,
     pip_install,
     pip_install_requirements,
+    pip_install_progressive,
     create_venv,
+    find_local_module,
+    set_pythonpath,
 )
 from .verifier import run_tests, VerifyResult
 from .policy import choose_policy
@@ -132,6 +135,16 @@ def _execute_tool(sb: Sandbox, tool: str, args: Dict[str, Any]) -> Dict[str, Any
         except (ValueError, TypeError):
             timeout = 60
         return create_venv(sb, args.get("venv_path", ".venv"), timeout_sec=timeout)
+    if tool == "sandbox.pip_install_progressive":
+        try:
+            timeout = int(args.get("timeout_sec", 300))
+        except (ValueError, TypeError):
+            timeout = 300
+        return pip_install_progressive(sb, args.get("packages", ""), timeout_sec=timeout)
+    if tool == "sandbox.find_local_module":
+        return find_local_module(sb, args.get("module_name", ""))
+    if tool == "sandbox.set_pythonpath":
+        return set_pythonpath(sb, args.get("path", ""))
     return {"ok": False, "error": f"Tool not allowed: {tool}"}
 
 
