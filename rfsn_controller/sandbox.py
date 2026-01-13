@@ -44,10 +44,17 @@ def _run(cmd: str, cwd: str, timeout_sec: int = 120) -> Tuple[int, str, str]:
     if not is_allowed:
         return 1, "", f"Command blocked by security policy: {reason}"
 
+    # Parse command into list (no shell=True for security)
+    # Use shlex.split to handle quoted arguments properly
+    try:
+        cmd_list = shlex.split(cmd)
+    except ValueError as e:
+        return 1, "", f"Command parsing error: {e}"
+
     p = subprocess.run(
-        cmd,
+        cmd_list,
         cwd=cwd,
-        shell=True,
+        shell=False,  # Explicitly disable shell
         text=True,
         capture_output=True,
         timeout=timeout_sec,

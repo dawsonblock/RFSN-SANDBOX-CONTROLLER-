@@ -14,8 +14,6 @@ ALLOWED_COMMANDS: Set[str] = {
     "python3",
     "pip",
     "pip3",
-    "bash",
-    "sh",
     "cat",
     "head",
     "tail",
@@ -38,6 +36,8 @@ ALLOWED_COMMANDS: Set[str] = {
     "wc",
     "diff",
     "patch",
+    "ruff",  # Linter
+    "mypy",  # Type checker
 }
 
 # Commands that are explicitly blocked
@@ -86,6 +86,21 @@ BLOCKED_FLAGS: List[str] = [
     "ANTHROPIC_API_KEY",
 ]
 
+# Shell metacharacters that enable command chaining or injection
+BLOCKED_METACHARACTERS: List[str] = [
+    ";",  # Command separator
+    "|",  # Pipe
+    "&",  # Background
+    ">",  # Output redirect
+    "<",  # Input redirect
+    "$(",  # Command substitution
+    "`",  # Backtick command substitution
+    "\n",  # Newline for command chaining
+    "\\",  # Escape character
+    "&&",  # AND operator
+    "||",  # OR operator
+]
+
 
 def is_command_allowed(command: str) -> tuple[bool, Optional[str]]:
     """Check if a command is allowed to execute.
@@ -127,8 +142,14 @@ def is_command_allowed(command: str) -> tuple[bool, Optional[str]]:
     if "sudo" in command_lower or "su " in command_lower:
         return False, "Privilege escalation blocked"
 
+    # Check for shell metacharacters
+    for meta in BLOCKED_METACHARACTERS:
+        if meta in command:
+            return False, f"Shell metacharacter blocked: {repr(meta)}"
+
     # Check for API key exposure attempts
-    if any(key in command for key in ["API_KEY", "SECRET", "TOKEN", "PASSWORD"]):
+    sensitive_keys = ["API_KEY", "SECRET", "TOKEN", "PASSWORD"]
+    if any(key in command for key in sensitive_keys):
         if "echo" in command_lower or "cat" in command_lower or "print" in command_lower:
             return False, "Potential credential exposure blocked"
 
