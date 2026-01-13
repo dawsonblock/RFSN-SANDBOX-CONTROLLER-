@@ -18,7 +18,6 @@ RUN pip install --no-cache-dir -r requirements.txt
 
 # Copy application code
 COPY rfsn_controller/ /app/rfsn_controller/
-COPY setup.py /app/
 COPY README.md /app/
 
 # Create sandbox directory
@@ -33,5 +32,5 @@ RUN useradd -m -u 1000 rfsn && \
     chown -R rfsn:rfsn /app /sandbox
 USER rfsn
 
-# Default command
-CMD ["python", "-m", "rfsn_controller.cli"]
+# Default command (use ENTRYPOINT to allow args)
+ENTRYPOINT ["python", "-m", "rfsn_controller.cli"]
