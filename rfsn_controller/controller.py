@@ -83,19 +83,18 @@ def _constraints_text() -> str:
 
 
 def _execute_tool(sb: Sandbox, tool: str, args: Dict[str, Any]) -> Dict[str, Any]:
-    """Execute a sandbox tool by name with the provided arguments."""
+    """Execute a sandbox tool by name with the provided arguments.
+
+    Note: sandbox.run is intentionally NOT exposed to the model.
+    The controller handles test execution directly for security.
+    """
     if not isinstance(args, dict):
         args = {}
     if tool == "sandbox.clone_repo":
         return clone_public_github(sb, args.get("github_url", ""))
     if tool == "sandbox.checkout":
         return checkout(sb, args.get("ref", ""))
-    if tool == "sandbox.run":
-        try:
-            timeout = int(args.get("timeout_sec", 120))
-        except (ValueError, TypeError):
-            timeout = 120
-        return run_cmd(sb, args.get("cmd", ""), timeout_sec=timeout)
+    # sandbox.run intentionally removed - controller-only for security
     if tool == "sandbox.read_file":
         try:
             max_bytes = int(args.get("max_bytes", 120000))
@@ -148,7 +147,7 @@ def _execute_tool(sb: Sandbox, tool: str, args: Dict[str, Any]) -> Dict[str, Any
         return find_local_module(sb, args.get("module_name", ""))
     if tool == "sandbox.set_pythonpath":
         return set_pythonpath(sb, args.get("path", ""))
-    return {"ok": False, "error": f"Tool not allowed: {tool}"}
+    return {"ok": False, "error": f"Unknown tool: {tool}"}
 
 
 def _collect_relevant_files(sb: Sandbox, v: VerifyResult, repo_tree: str) -> List[Dict[str, Any]]:
