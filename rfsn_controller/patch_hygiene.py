@@ -138,12 +138,17 @@ def validate_patch_hygiene(
     
     # Check for test deletion
     if not config.allow_test_deletion:
-        for filepath in files_changed:
-            if _is_test_file(filepath):
-                # Check if file was deleted (diff starts with "deleted file")
-                if f"deleted file mode 100644 {filepath}" in diff or \
-                   f"deleted file mode 100755 {filepath}" in diff:
-                    violations.append(f"Cannot delete test file: {filepath}")
+        # Check if any file was deleted (diff shows +++ /dev/null)
+        for line in diff.split('\n'):
+            if line.startswith('+++ /dev/null'):
+                # File was deleted - check if it was a test file
+                # Find the corresponding --- a/ line
+                for prev_line in diff.split('\n'):
+                    if prev_line.startswith('--- a/'):
+                        deleted_file = prev_line[6:]  # Remove '--- a/'
+                        if _is_test_file(deleted_file):
+                            violations.append(f"Cannot delete test file: {deleted_file}")
+                        break
     
     # Check for skip patterns in modified files
     skip_patterns = [
@@ -191,19 +196,24 @@ def _parse_diff(diff: str) -> Tuple[Set[str], int, int]:
     files_changed = set()
     lines_added = 0
     lines_removed = 0
-    
+
     for line in diff.split('\n'):
-        if line.startswith('+++ b/') or line.startswith('--- a/'):
-            # Extract file path
-            parts = line.split('/')
-            if len(parts) > 2:
-                filepath = '/'.join(parts[2:])
+        if line.startswith('+++ b/'):
+            # Extract file path from +++ b/path
+            filepath = line[6:]  # Remove '+++ b/'
+            if filepath != '/dev/null':
+                files_changed.add(filepath)
+        elif line.startswith('--- a/'):
+            # Extract file path from --- a/path (for deleted files)
+            filepath = line[6:]  # Remove '--- a/'
+            # Only add if we haven't seen it from +++ b/ (deleted files)
+            if filepath != '/dev/null':
                 files_changed.add(filepath)
         elif line.startswith('+') and not line.startswith('+++'):
             lines_added += 1
         elif line.startswith('-') and not line.startswith('---'):
             lines_removed += 1
-    
+
     return files_changed, lines_added, lines_removed
 
 

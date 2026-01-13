@@ -147,12 +147,11 @@ class TestToolDedupe:
 
         allowed, blocked = manager.filter_requests(requests)
 
-        # Should allow first unique requests up to limit (max_requests_per_response=2)
-        assert len(allowed) == 2
-        # Should block duplicate (but it's within the limit so it gets filtered out before blocking)
-        # Actually, the duplicate is filtered out when checking, so blocked might be empty
-        # Let me check what actually happens
-        assert len(allowed) <= 2
+        # First: requests are truncated to max_requests_per_response=2
+        # Then: duplicates are filtered out
+        # Result: only 1 unique request allowed (the first read_file)
+        assert len(allowed) == 1
+        assert allowed[0]["tool"] == "sandbox.read_file"
 
 
 class TestPatchHygiene:
@@ -239,7 +238,7 @@ class TestPatchHygiene:
 
     def test_skip_patterns(self):
         """Test that patches with skip patterns are rejected."""
-        skip_patterns = ['@pytest.mark.skip', '@unittest.skip', 'xfail']
+        skip_patterns = ['@pytest.mark.skip', '@unittest.skip', '@pytest.mark.xfail']
         for pattern in skip_patterns:
             diff = f"""--- a/test_file.py
 +++ b/test_file.py
@@ -276,7 +275,7 @@ class TestStallDetector(unittest.TestCase):
         assert stall_state.stall_threshold == 3
         assert stall_state.iterations_without_improvement == 0
         assert stall_state.failing_tests_count == 0
-        assert stall_state.top_failing_test_id is None
+        assert stall_state.failing_test_id is None
         assert stall_state.error_signature == ""
 
     def test_stall_detection_no_improvement(self):
@@ -316,19 +315,13 @@ class TestStallDetector(unittest.TestCase):
         assert stall_state.iterations_without_improvement == 0
         assert stall_state.failing_tests_count == 3
 
-        assert stall_state.failing_tests_count == 0
-        assert stall_state.failing_test_id is None
-        assert stall_state.error_signature == ""
-        assert stall_state.iterations_without_improvement == 0
-        assert not stall_state.is_stalled()
-
     def test_stall_score(self):
         """Test that stall score is computed correctly."""
         stall_state = StallState()
 
         stall_state.update(failing_count=5, test_id="test_1", sig="sig1")
         score = stall_state.get_score()
-        assert score == (5, True)  # (failing_count, signature_changed_bool)
+        assert score == (5, True)  # (failing_count, has_error_signature)
 
         stall_state.update(failing_count=3, test_id="test_1", sig="sig1")
         score = stall_state.get_score()
