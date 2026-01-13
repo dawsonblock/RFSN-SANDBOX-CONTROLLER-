@@ -267,6 +267,13 @@ class ControllerConfig:
     max_steps_without_progress: int = 10  # Early termination if no progress
     collect_finetuning_data: bool = False  # Collect successful patches for fine-tuning
     model: str = "gemini-2.0-flash-exp"  # Model to use for generation
+    max_minutes: int = 30  # Total time budget in minutes
+    install_timeout: int = 300  # Timeout for dependency installation
+    focus_timeout: int = 120  # Timeout for focused test runs
+    full_timeout: int = 300  # Timeout for full test suite runs
+    max_tool_calls: int = 40  # Maximum total tool calls per run
+    docker_image: str = "python:3.11-slim"  # Docker image for sandboxed execution
+    unsafe_host_exec: bool = False  # Allow running commands on host instead of Docker
 
 
 def run_controller(cfg: ControllerConfig) -> Dict[str, Any]:

@@ -56,6 +56,46 @@ def main() -> None:
         default=os.getenv("GEMINI_MODEL", "gemini-2.0-flash-exp"),
         help="Gemini model to use (default: gemini-2.0-flash-exp, or GEMINI_MODEL env var)",
     )
+    parser.add_argument(
+        "--max-minutes",
+        type=int,
+        default=30,
+        help="Total time budget in minutes (default: 30)",
+    )
+    parser.add_argument(
+        "--install-timeout",
+        type=int,
+        default=300,
+        help="Timeout for dependency installation in seconds (default: 300)",
+    )
+    parser.add_argument(
+        "--focus-timeout",
+        type=int,
+        default=120,
+        help="Timeout for focused test runs in seconds (default: 120)",
+    )
+    parser.add_argument(
+        "--full-timeout",
+        type=int,
+        default=300,
+        help="Timeout for full test suite runs in seconds (default: 300)",
+    )
+    parser.add_argument(
+        "--max-tool-calls",
+        type=int,
+        default=40,
+        help="Maximum total tool calls per run (default: 40)",
+    )
+    parser.add_argument(
+        "--docker-image",
+        default="python:3.11-slim",
+        help="Docker image for sandboxed execution (default: python:3.11-slim)",
+    )
+    parser.add_argument(
+        "--unsafe-host-exec",
+        action="store_true",
+        help="Allow running commands on host instead of Docker (DANGEROUS, not recommended)",
+    )
     args = parser.parse_args()
 
     cfg = ControllerConfig(
@@ -67,6 +107,13 @@ def main() -> None:
         max_steps_without_progress=args.max_steps_without_progress,
         collect_finetuning_data=args.collect_finetuning_data,
         model=args.model,
+        max_minutes=args.max_minutes,
+        install_timeout=args.install_timeout,
+        focus_timeout=args.focus_timeout,
+        full_timeout=args.full_timeout,
+        max_tool_calls=args.max_tool_calls,
+        docker_image=args.docker_image,
+        unsafe_host_exec=args.unsafe_host_exec,
     )
     result = run_controller(cfg)
     print(result)
