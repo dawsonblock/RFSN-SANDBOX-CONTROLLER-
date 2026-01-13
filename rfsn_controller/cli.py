@@ -1,4 +1,5 @@
 import argparse
+import os
 from dotenv import load_dotenv
 
 from .controller import ControllerConfig, run_controller
@@ -50,6 +51,11 @@ def main() -> None:
         action="store_true",
         help="Collect successful patches for model fine-tuning",
     )
+    parser.add_argument(
+        "--model",
+        default=os.getenv("GEMINI_MODEL", "gemini-2.0-flash-exp"),
+        help="Gemini model to use (default: gemini-2.0-flash-exp, or GEMINI_MODEL env var)",
+    )
     args = parser.parse_args()
 
     cfg = ControllerConfig(
@@ -60,6 +66,7 @@ def main() -> None:
         fix_all=args.fix_all,
         max_steps_without_progress=args.max_steps_without_progress,
         collect_finetuning_data=args.collect_finetuning_data,
+        model=args.model,
     )
     result = run_controller(cfg)
     print(result)

@@ -36,6 +36,9 @@ from .sandbox import (
     find_local_module,
     set_pythonpath,
 )
+from .url_validation import validate_github_url
+from .patch_hygiene import validate_patch_hygiene, PatchHygieneConfig
+from .tool_manager import ToolRequestManager, ToolRequestConfig
 from .verifier import run_tests, VerifyResult
 from .policy import choose_policy
 from .prompt import build_model_input
@@ -264,6 +267,7 @@ class ControllerConfig:
     fix_all: bool = False  # Continue until all tests pass
     max_steps_without_progress: int = 10  # Early termination if no progress
     collect_finetuning_data: bool = False  # Collect successful patches for fine-tuning
+    model: str = "gemini-2.0-flash-exp"  # Model to use for generation
 
 
 def run_controller(cfg: ControllerConfig) -> Dict[str, Any]:
@@ -289,8 +293,24 @@ def run_controller(cfg: ControllerConfig) -> Dict[str, Any]:
     try:
         write_jsonl(log_dir, {"phase": "init", "cfg": cfg.__dict__})
 
+        # Validate GitHub URL
+        is_valid, normalized_url, url_error = validate_github_url(cfg.github_url)
+        if not is_valid:
+            return {"ok": False, "error": f"Invalid GitHub URL: {url_error}"}
+
+        # Use normalized URL
+        github_url = normalized_url
+
+        # Initialize tool request manager
+        tool_manager = ToolRequestManager(ToolRequestConfig())
+
+        # Initialize patch hygiene config
+        patch_config = PatchHygieneConfig()
+
+        write_jsonl(log_dir, {"phase": "url_validation", "normalized_url": github_url})
+
         # ingest repo
-        r = clone_public_github(sb, cfg.github_url)
+        r = clone_public_github(sb, github_url)
         write_jsonl(log_dir, {"phase": "clone", "result": r})
         if not r.get("ok"):
             return {"ok": False, "error": r.get("error") or r.get("stderr")}
