@@ -4,7 +4,7 @@ import os
 from openai import OpenAI
 
 
-MODEL = "deepseek-r1"
+MODEL = "deepseek-chat"
 
 SYSTEM = """
 You are a controller-driven code-repair model.

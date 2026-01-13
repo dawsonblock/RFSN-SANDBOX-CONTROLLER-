@@ -597,7 +597,9 @@ def docker_test(
     Returns:
         DockerResult with test status and output.
     """
+    # Enable network for npx commands (need to download packages)
+    network_enabled = cmd.startswith("npx ")
     return docker_run(
-        sb, cmd, timeout_sec=timeout_sec, network=False, docker_image=docker_image,
+        sb, cmd, timeout_sec=timeout_sec, network=network_enabled, docker_image=docker_image,
         cpu=cpu, mem_mb=mem_mb, pids=pids, read_only=read_only
     )

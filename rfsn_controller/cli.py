@@ -53,8 +53,8 @@ def main() -> None:
     )
     parser.add_argument(
         "--model",
-        default=os.getenv("RFSN_MODEL", "deepseek-r1"),
-        help="Model to use (default: deepseek-r1, or RFSN_MODEL env var)",
+        default=os.getenv("RFSN_MODEL", "deepseek-chat"),
+        help="Model to use (default: deepseek-chat, or RFSN_MODEL env var)",
     )
     parser.add_argument(
         "--max-minutes",

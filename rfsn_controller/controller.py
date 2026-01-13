@@ -293,7 +293,7 @@ class ControllerConfig:
     fix_all: bool = False
     max_steps_without_progress: int = 10
     collect_finetuning_data: bool = False
-    model: str = "deepseek-r1"
+    model: str = "deepseek-chat"
     max_minutes: int = 30
     install_timeout: int = 300
     focus_timeout: int = 120
