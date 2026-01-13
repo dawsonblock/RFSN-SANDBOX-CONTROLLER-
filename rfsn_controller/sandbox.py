@@ -370,10 +370,11 @@ def run_cmd(sb: Sandbox, cmd: str, timeout_sec: int = 120) -> Dict[str, Any]:
 
 def apply_patch(sb: Sandbox, diff: str) -> Dict[str, Any]:
     """Apply a unified diff directly to the repository."""
+    # Use subprocess with list instead of shell=True for security
     p = subprocess.run(
-        "git apply -",
+        ["git", "apply", "-"],
         cwd=sb.repo_dir,
-        shell=True,
+        shell=False,
         text=True,
         input=diff,
         capture_output=True,
@@ -417,10 +418,11 @@ def drop_worktree(sb: Sandbox, wt_dir: str) -> None:
 
 def apply_patch_in_dir(wt_dir: str, diff: str) -> Dict[str, Any]:
     """Apply a unified diff inside a specific worktree."""
+    # Use subprocess with list instead of shell=True for security
     p = subprocess.run(
-        "git apply -",
+        ["git", "apply", "-"],
         cwd=wt_dir,
-        shell=True,
+        shell=False,
         text=True,
         input=diff,
         capture_output=True,

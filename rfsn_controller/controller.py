@@ -58,8 +58,12 @@ from .project_detector import ProjectDetector, ProjectType
 from .language_templates import Language, get_buildpack_image
 from .apt_whitelist import AptWhitelist, AptTier
 from .sysdeps_installer import SysdepsInstaller
-from .trace_parser import TraceParser
-from .goals import GoalSetFactory
+from .setup_report import SetupReport, create_setup_report
+from .test_detector import TestDetector
+from .buildpacks import (
+    get_all_buildpacks,
+    BuildpackContext,
+)
 
 
 FORBIDDEN_PREFIXES = [".git/", "node_modules/", ".venv/", "venv/", "__pycache__/"]
@@ -365,61 +369,95 @@ def run_controller(cfg: ControllerConfig) -> Dict[str, Any]:
 
         reset_hard(sb)
         tree = list_tree(sb, max_files=2000)
-        repo_tree_text = "\n".join(tree.get("files", [])) if tree.get("ok") else ""
+        repo_tree = tree.get("files", []) if tree.get("ok") else []
+        repo_tree_text = "\n".join(repo_tree)
 
         # === PHASE: DETECT ===
         current_phase = Phase.DETECT
         write_jsonl(log_dir, PhaseTransition(Phase.INGEST, Phase.DETECT).to_dict())
 
-        # V3: Use new ProjectDetector for multi-language support
+        # === PHASE: V3 BUILDPACK DETECTION ===
+        selected_buildpack = None
+        selected_buildpack_instance = None
+
         try:
-            v3_detector = ProjectDetector(sb.repo_dir)
-            v3_detection = v3_detector.detect()
+            # Create buildpack context
+            buildpack_ctx = BuildpackContext(
+                repo_dir=sb.repo_dir,
+                repo_tree=repo_tree,
+                files={},
+            )
 
-            # Override project type if specified
-            if cfg.project_type != "auto":
-                type_map = {
-                    "python": ProjectType.PYTHON,
-                    "node": ProjectType.NODE,
-                    "go": ProjectType.GO,
-                    "rust": ProjectType.RUST,
-                    "java": ProjectType.JAVA,
-                    "dotnet": ProjectType.DOTNET,
-                }
-                if cfg.project_type in type_map:
-                    v3_detection.project_type = type_map[cfg.project_type]
+            # Read relevant files for buildpack detection
+            buildpack_files = [
+                "pyproject.toml", "requirements.txt", "setup.py", "setup.cfg",
+                "package.json", "package-lock.json", "yarn.lock", "pnpm-lock.yaml",
+                "go.mod", "go.sum",
+                "Cargo.toml", "Cargo.lock",
+                "pom.xml", "build.gradle", "build.gradle.kts", "gradlew",
+                "*.sln", "*.csproj", "global.json",
+            ]
 
-            # Select buildpack image
-            if cfg.buildpack == "auto":
-                lang_map = {
-                    ProjectType.PYTHON: Language.PYTHON,
-                    ProjectType.NODE: Language.NODE,
-                    ProjectType.GO: Language.GO,
-                    ProjectType.RUST: Language.RUST,
-                    ProjectType.JAVA: Language.JAVA,
-                    ProjectType.DOTNET: Language.DOTNET,
-                }
-                lang = lang_map.get(v3_detection.project_type, Language.PYTHON)
-                selected_buildpack = get_buildpack_image(lang)
+            for filename in buildpack_files:
+                if "*" in filename:
+                    # Handle wildcards
+                    try:
+                        result = grep(sb, filename)
+                        if result and result.stdout:
+                            files = result.stdout.strip().split("\n")
+                            for f in files:
+                                try:
+                                    content = read_file(sb, f)
+                                    if content:
+                                        buildpack_ctx.files[f] = content
+                                except Exception:
+                                    pass
+                    except Exception:
+                        pass
+                else:
+                    try:
+                        content = read_file(sb, filename)
+                        if content:
+                            buildpack_ctx.files[filename] = content
+                    except Exception:
+                        pass
+
+            # Detect buildpack
+            all_buildpacks = get_all_buildpacks()
+            best_result = None
+            best_buildpack = None
+
+            for buildpack in all_buildpacks:
+                result = buildpack.detect(buildpack_ctx)
+                if result and result.confidence > 0.5:
+                    if best_result is None or result.confidence > best_result.confidence:
+                        best_result = result
+                        best_buildpack = buildpack
+
+            if best_buildpack and best_result:
+                selected_buildpack_instance = best_buildpack
+                selected_buildpack = best_buildpack.image()
+
+                write_jsonl(log_dir, {
+                    "phase": "buildpack_detect",
+                    "buildpack_type": best_result.buildpack_type.value,
+                    "confidence": best_result.confidence,
+                    "workspace": best_result.workspace,
+                    "image": selected_buildpack,
+                    "metadata": best_result.metadata,
+                })
             else:
-                selected_buildpack = cfg.buildpack
-
-            write_jsonl(log_dir, {
-                "phase": "v3_detect",
-                "project_type": v3_detection.project_type.value,
-                "install_strategy": v3_detection.install_strategy,
-                "test_strategy": v3_detection.test_strategy,
-                "build_strategy": v3_detection.build_strategy,
-                "requires_services": v3_detection.requires_services,
-                "system_deps_hint": v3_detection.system_deps_hint,
-                "confidence": v3_detection.confidence,
-                "selected_buildpack": selected_buildpack,
-            })
+                # Fallback to docker_image
+                selected_buildpack = cfg.docker_image
+                write_jsonl(log_dir, {
+                    "phase": "buildpack_detect",
+                    "error": "No buildpack detected",
+                    "fallback_image": selected_buildpack,
+                })
         except Exception as e:
-            # Fallback to old detection if v3 fails
-            v3_detection = None
+            # Fallback to docker_image if buildpack detection fails
             selected_buildpack = cfg.docker_image
-            write_jsonl(log_dir, {"phase": "v3_detect", "error": str(e)})
+            write_jsonl(log_dir, {"phase": "buildpack_detect", "error": str(e)})
 
         # Legacy detection for backward compatibility
         project_type = detect_project_type(sb.repo_dir)
@@ -444,14 +482,26 @@ def run_controller(cfg: ControllerConfig) -> Dict[str, Any]:
         current_phase = Phase.SETUP
         write_jsonl(log_dir, PhaseTransition(Phase.DETECT, Phase.SETUP).to_dict())
 
-        # Run setup commands with Docker (network ON)
-        if setup_commands and not cfg.unsafe_host_exec:
-            for setup_cmd in setup_commands:
-                print(f"[SETUP] Running: {setup_cmd}")
-                result = docker_install(sb, setup_cmd, timeout_sec=cfg.install_timeout, docker_image=cfg.docker_image)
+        # Track setup results for validation
+        setup_results = {}
+        lockfile_path = None
+
+        # Use buildpack install plan if available
+        if selected_buildpack_instance:
+            print(f"[SETUP] Using buildpack: {selected_buildpack_instance.buildpack_type.value}")
+            install_steps = selected_buildpack_instance.install_plan(buildpack_ctx)
+
+            for step in install_steps:
+                print(f"[SETUP] Running: {step.description}")
+                cmd_str = " ".join(step.argv)
+                result = docker_install(sb, cmd_str, timeout_sec=step.timeout_sec, docker_image=selected_buildpack)
+
+                # Store result by step description
+                setup_results[step.description] = result
+
                 command_log.append({
                     "phase": "setup",
-                    "command": setup_cmd,
+                    "command": cmd_str,
                     "exit_code": result.exit_code,
                     "ok": result.ok,
                     "stdout": result.stdout[:1000],
@@ -459,17 +509,65 @@ def run_controller(cfg: ControllerConfig) -> Dict[str, Any]:
                 })
                 write_jsonl(log_dir, {
                     "phase": "setup",
-                    "command": setup_cmd,
+                    "command": cmd_str,
                     "result": {"ok": result.ok, "exit_code": result.exit_code},
                 })
                 if not result.ok:
                     print(f"[SETUP] Failed: {result.stderr[:200]}")
-                    # Continue anyway - some repos might not need all setup
+        else:
+            # Legacy setup
+            if setup_commands and not cfg.unsafe_host_exec:
+                for setup_cmd in setup_commands:
+                    print(f"[SETUP] Running: {setup_cmd}")
+                    result = docker_install(sb, setup_cmd, timeout_sec=cfg.install_timeout, docker_image=selected_buildpack)
+
+                    # Store result by command type
+                    cmd_lower = setup_cmd.lower()
+                    if "pip install" in cmd_lower or "python -m pip" in cmd_lower:
+                        setup_results["pip"] = result
+                    elif "npm install" in cmd_lower or "npm ci" in cmd_lower:
+                        setup_results["node"] = result
+                    elif "go mod" in cmd_lower:
+                        setup_results["go"] = result
+                    elif "cargo" in cmd_lower:
+                        setup_results["rust"] = result
+                    elif "mvn" in cmd_lower or "gradle" in cmd_lower:
+                        setup_results["java"] = result
+                    elif "dotnet restore" in cmd_lower:
+                        setup_results["dotnet"] = result
+
+                    command_log.append({
+                        "phase": "setup",
+                        "command": setup_cmd,
+                        "exit_code": result.exit_code,
+                        "ok": result.ok,
+                        "stdout": result.stdout[:1000],
+                        "stderr": result.stderr[:1000],
+                    })
+                    write_jsonl(log_dir, {
+                        "phase": "setup",
+                        "command": setup_cmd,
+                        "result": {"ok": result.ok, "exit_code": result.exit_code},
+                    })
+                    if not result.ok:
+                        print(f"[SETUP] Failed: {result.stderr[:200]}")
+
+        # Detect lockfile
+        if selected_buildpack_instance:
+            # Lockfile detection is handled by buildpack metadata
+            if best_result and best_result.metadata:
+                lockfile_path = best_result.metadata.get("lockfile")
 
         # === PHASE: SYSDEPS (V3) ===
-        if cfg.enable_sysdeps and v3_detection and v3_detection.system_deps_hint:
+        sysdeps_installed = []
+        sysdeps_blocked = []
+
+        if cfg.enable_sysdeps and selected_buildpack_instance:
             current_phase = Phase.SETUP
             write_jsonl(log_dir, {"phase": "sysdeps", "enabled": True})
+
+            # Use buildpack's sysdeps whitelist
+            sysdeps_whitelist = selected_buildpack_instance.sysdeps_whitelist()
 
             tier_map = {
                 0: AptTier.TIER_0,
@@ -481,10 +579,12 @@ def run_controller(cfg: ControllerConfig) -> Dict[str, Any]:
                 6: AptTier.TIER_6,
                 7: AptTier.TIER_7,
             }
+
             whitelist = AptWhitelist(
                 max_packages=cfg.sysdeps_max_packages,
                 max_tier=tier_map.get(cfg.sysdeps_tier, AptTier.TIER_4),
                 allow_wildcards=False,
+                custom_packages=sysdeps_whitelist,
             )
 
             installer = SysdepsInstaller(
@@ -495,33 +595,84 @@ def run_controller(cfg: ControllerConfig) -> Dict[str, Any]:
             print("[SYSDEPS] Installing system dependencies...")
             sysdeps_result = installer.install(
                 packages=[],
-                hints=v3_detection.system_deps_hint,
+                hints=[],
             )
+
+            sysdeps_installed = sysdeps_result.installed_packages
+            sysdeps_blocked = sysdeps_result.blocked_packages
 
             write_jsonl(log_dir, {
                 "phase": "sysdeps",
                 "result": {
                     "success": sysdeps_result.success,
-                    "installed": sysdeps_result.installed_packages,
-                    "blocked": sysdeps_result.blocked_packages,
+                    "installed": sysdeps_installed,
+                    "blocked": sysdeps_blocked,
                     "error": sysdeps_result.error_message,
                 },
             })
 
             if sysdeps_result.success:
-                print(f"[SYSDEPS] Installed: {sysdeps_result.installed_packages}")
+                print(f"[SYSDEPS] Installed: {sysdeps_installed}")
             else:
                 print(f"[SYSDEPS] Failed: {sysdeps_result.error_message}")
-                if sysdeps_result.blocked_packages:
-                    print(f"[SYSDEPS] Blocked packages: {sysdeps_result.blocked_packages}")
+                if sysdeps_blocked:
+                    print(f"[SYSDEPS] Blocked packages: {sysdeps_blocked}")
+
+        # === PHASE: SETUP VALIDATION ===
+        # Create setup report and check if we should bail out
+        setup_report = create_setup_report(
+            setup_results=setup_results,
+            lockfile_path=lockfile_path,
+            sysdeps_installed=sysdeps_installed,
+            sysdeps_failed=[],
+            sysdeps_blocked=sysdeps_blocked,
+            sysdeps_missing=[],
+        )
+
+        write_jsonl(log_dir, {
+            "phase": "setup_validation",
+            "report": setup_report.to_dict(),
+        })
+
+        # Hard bailout if setup failed
+        if setup_report.should_bailout():
+            bailout_reason = setup_report.get_bailout_message()
+            print(f"\n[BAILOUT] {bailout_reason}")
+            write_jsonl(log_dir, {
+                "phase": "bailout",
+                "reason": bailout_reason,
+                "setup_report": setup_report.to_dict(),
+            })
+
+            return {
+                "ok": False,
+                "error": bailout_reason,
+                "sandbox": sb.root,
+                "repo_dir": sb.repo_dir,
+                "phase": "setup_failed",
+            }
+
+        print("\n[SETUP_VALIDATION] Setup passed")
+        if setup_report.has_lockfile:
+            print(f"  Lockfile found: {setup_report.lockfile_path}")
+        if setup_report.sysdeps_installed:
+            print(f"  System deps installed: {setup_report.sysdeps_installed}")
 
         # === PHASE: BASELINE ===
         current_phase = Phase.BASELINE
         write_jsonl(log_dir, PhaseTransition(Phase.SETUP, Phase.BASELINE).to_dict())
 
+        # Use buildpack test plan if available
+        if selected_buildpack_instance:
+            test_plan = selected_buildpack_instance.test_plan(buildpack_ctx)
+            effective_test_cmd = " ".join(test_plan.argv)
+        else:
+            # Use detected test command
+            effective_test_cmd = cfg.test_cmd if cfg.test_cmd != "pytest -q" else (detected_test_cmd or "pytest -q")
+
         # Run baseline tests
         print(f"\n[BASELINE] Running: {effective_test_cmd}")
-        v = _run_tests_in_sandbox(sb, effective_test_cmd, cfg, command_log)
+        v = _run_tests_in_sandbox(sb, effective_test_cmd, cfg, command_log, selected_buildpack)
         baseline_output = (v.stdout or "") + "\n" + (v.stderr or "")
 
         write_jsonl(log_dir, {
@@ -532,8 +683,46 @@ def run_controller(cfg: ControllerConfig) -> Dict[str, Any]:
             "sig": v.sig,
         })
 
+        # Handle pytest exit code 2 (no tests found)
+        if v.exit_code == 2 and not v.ok:
+            print(f"\n[BASELINE] Exit code 2 detected - no tests found")
+            # Try alternative test commands based on buildpack
+            if selected_buildpack_instance:
+                # Buildpack-specific fallbacks
+                if selected_buildpack_instance.buildpack_type.value == "python":
+                    suggestions = [
+                        "python -m pytest -q --collect-only",
+                        "python -m pytest -q tests/",
+                        "python -m unittest discover -q",
+                    ]
+                elif selected_buildpack_instance.buildpack_type.value == "node":
+                    suggestions = [
+                        "npm test -- --listTests",
+                        "npm test -- tests/",
+                    ]
+                else:
+                    suggestions = []
+
+                if suggestions:
+                    suggested_cmd = suggestions[0]
+                    print(f"\n[BASELINE] Retrying with: {suggested_cmd}")
+                    v = _run_tests_in_sandbox(sb, suggested_cmd, cfg, command_log, selected_buildpack)
+                    baseline_output = (v.stdout or "") + "\n" + (v.stderr or "")
+
+                    write_jsonl(log_dir, {
+                        "phase": "baseline_retry",
+                        "tests_ok": v.ok,
+                        "exit_code": v.exit_code,
+                        "failing_tests": v.failing_tests,
+                        "sig": v.sig,
+                    })
+
+                    if v.ok or v.exit_code != 2:
+                        effective_test_cmd = suggested_cmd
+                        print(f"  Using new test command: {effective_test_cmd}")
+
         if v.ok:
-            print(f"\n✅ SUCCESS! All tests passing at baseline.")
+            print(f"\n[BASELINE] SUCCESS! All tests passing at baseline.")
             return {
                 "ok": True,
                 "sandbox": sb.root,
@@ -553,7 +742,7 @@ def run_controller(cfg: ControllerConfig) -> Dict[str, Any]:
         while step < max_iterations:
             # Progress reporting
             print(f"\n[Step {step}] Running tests...")
-            v = _run_tests_in_sandbox(sb, effective_test_cmd, cfg, command_log)
+            v = _run_tests_in_sandbox(sb, effective_test_cmd, cfg, command_log, selected_buildpack)
             final_output = (v.stdout or "") + "\n" + (v.stderr or "")
 
             print(f"[Step {step}] Tests: {'PASS' if v.ok else 'FAIL'} | Failing: {len(v.failing_tests)} tests")
@@ -724,7 +913,7 @@ def run_controller(cfg: ControllerConfig) -> Dict[str, Any]:
                         sb, valid_patches, effective_test_cmd,
                         temps=cfg.temps, timeout_sec=cfg.focus_timeout,
                         use_docker=not cfg.unsafe_host_exec,
-                        docker_image=cfg.docker_image,
+                        docker_image=selected_buildpack,
                     )
 
                     winner = find_first_successful_patch(results)
@@ -746,7 +935,7 @@ def run_controller(cfg: ControllerConfig) -> Dict[str, Any]:
             write_jsonl(log_dir, PhaseTransition(Phase.REPAIR_LOOP, Phase.FINAL_VERIFY).to_dict())
 
             print(f"\n[FINAL_VERIFY] Running full test suite...")
-            v = _run_tests_in_sandbox(sb, effective_test_cmd, cfg, command_log)
+            v = _run_tests_in_sandbox(sb, effective_test_cmd, cfg, command_log, selected_buildpack)
             final_output = (v.stdout or "") + "\n" + (v.stderr or "")
 
             if v.ok:
@@ -807,6 +996,7 @@ def _run_tests_in_sandbox(
     test_cmd: str,
     cfg: ControllerConfig,
     command_log: List[Dict[str, Any]],
+    docker_image: str,
 ) -> VerifyResult:
     """Run tests in Docker or on host based on configuration.
 
@@ -815,6 +1005,7 @@ def _run_tests_in_sandbox(
         test_cmd: Test command to run.
         cfg: Controller configuration.
         command_log: Command execution log.
+        docker_image: Docker image to use for execution.
 
     Returns:
         VerifyResult with test results.
@@ -824,7 +1015,7 @@ def _run_tests_in_sandbox(
         return run_tests(sb, test_cmd, timeout_sec=cfg.focus_timeout)
     else:
         # Run in Docker with network OFF
-        result = docker_test(sb, test_cmd, timeout_sec=cfg.focus_timeout, docker_image=cfg.docker_image)
+        result = docker_test(sb, test_cmd, timeout_sec=cfg.focus_timeout, docker_image=docker_image)
 
         command_log.append({
             "phase": "test",
