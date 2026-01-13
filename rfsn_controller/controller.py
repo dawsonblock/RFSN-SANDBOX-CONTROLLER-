@@ -35,6 +35,8 @@ from .sandbox import (
     create_venv,
     find_local_module,
     set_pythonpath,
+    docker_install,
+    docker_test,
 )
 from .url_validation import validate_github_url
 from .patch_hygiene import validate_patch_hygiene, PatchHygieneConfig
@@ -46,6 +48,10 @@ from .llm_gemini import call_model
 from .parsers import normalize_test_path, parse_trace_files
 from .log import write_jsonl
 from .parallel import evaluate_patches_parallel, find_first_successful_patch
+from .phases import Phase, PhaseTransition
+from .project_detection import detect_project_type, get_setup_commands, get_default_test_command
+from .stall_detector import StallState
+from .evidence_pack import EvidencePackExporter, EvidencePackConfig
 
 
 FORBIDDEN_PREFIXES = [".git/", "node_modules/", ".venv/", "venv/", "__pycache__/"]
@@ -296,31 +302,39 @@ def run_controller(cfg: ControllerConfig) -> Dict[str, Any]:
     min_failing_tests: int = 999999  # track minimum failing tests seen
     distinct_sigs: set[str] = set()  # track distinct error signatures for multi-bug detection
 
+    # Initialize vNext components
+    current_phase = Phase.INGEST
+    tool_manager = ToolRequestManager(ToolRequestConfig(max_total_requests_per_run=cfg.max_tool_calls))
+    stall_state = StallState()
+    evidence_exporter = EvidencePackExporter(EvidencePackConfig())
+    command_log: List[Dict[str, Any]] = []
+
+    # Track baseline for evidence pack
+    baseline_output = ""
+    final_output = ""
+    winner_diff = None
+
     try:
         write_jsonl(log_dir, {"phase": "init", "cfg": cfg.__dict__})
+
+        # === PHASE: INGEST ===
+        write_jsonl(log_dir, PhaseTransition(None, Phase.INGEST).to_dict())
 
         # Validate GitHub URL
         is_valid, normalized_url, url_error = validate_github_url(cfg.github_url)
         if not is_valid:
             return {"ok": False, "error": f"Invalid GitHub URL: {url_error}"}
 
-        # Use normalized URL
         github_url = normalized_url
-
-        # Initialize tool request manager
-        tool_manager = ToolRequestManager(ToolRequestConfig())
-
-        # Initialize patch hygiene config
-        patch_config = PatchHygieneConfig()
-
         write_jsonl(log_dir, {"phase": "url_validation", "normalized_url": github_url})
 
-        # ingest repo
+        # Clone repository
         r = clone_public_github(sb, github_url)
         write_jsonl(log_dir, {"phase": "clone", "result": r})
         if not r.get("ok"):
             return {"ok": False, "error": r.get("error") or r.get("stderr")}
 
+        # Checkout ref if specified
         if cfg.ref:
             co = checkout(sb, cfg.ref)
             write_jsonl(log_dir, {"phase": "checkout", "result": co})
@@ -331,8 +345,85 @@ def run_controller(cfg: ControllerConfig) -> Dict[str, Any]:
         tree = list_tree(sb, max_files=2000)
         repo_tree_text = "\n".join(tree.get("files", [])) if tree.get("ok") else ""
 
+        # === PHASE: DETECT ===
+        current_phase = Phase.DETECT
+        write_jsonl(log_dir, PhaseTransition(Phase.INGEST, Phase.DETECT).to_dict())
+
+        # Detect project type
+        project_type = detect_project_type(sb.repo_dir)
+        setup_commands = get_setup_commands(sb.repo_dir)
+        detected_test_cmd = get_default_test_command(sb.repo_dir)
+
+        # Use detected test command if not overridden
+        effective_test_cmd = cfg.test_cmd if cfg.test_cmd != "pytest -q" else (detected_test_cmd or "pytest -q")
+
+        write_jsonl(log_dir, {
+            "phase": "detect",
+            "project_type": project_type.name if project_type else None,
+            "setup_commands": setup_commands,
+            "detected_test_cmd": detected_test_cmd,
+            "effective_test_cmd": effective_test_cmd,
+        })
+
         # Detect QuixBugs repository structure
         is_quixbugs = "python_testcases/" in repo_tree_text and "python_programs/" in repo_tree_text
+
+        # === PHASE: SETUP ===
+        current_phase = Phase.SETUP
+        write_jsonl(log_dir, PhaseTransition(Phase.DETECT, Phase.SETUP).to_dict())
+
+        # Run setup commands with Docker (network ON)
+        if setup_commands and not cfg.unsafe_host_exec:
+            for setup_cmd in setup_commands:
+                print(f"[SETUP] Running: {setup_cmd}")
+                result = docker_install(sb, setup_cmd, timeout_sec=cfg.install_timeout, docker_image=cfg.docker_image)
+                command_log.append({
+                    "phase": "setup",
+                    "command": setup_cmd,
+                    "exit_code": result.exit_code,
+                    "ok": result.ok,
+                    "stdout": result.stdout[:1000],
+                    "stderr": result.stderr[:1000],
+                })
+                write_jsonl(log_dir, {
+                    "phase": "setup",
+                    "command": setup_cmd,
+                    "result": {"ok": result.ok, "exit_code": result.exit_code},
+                })
+                if not result.ok:
+                    print(f"[SETUP] Failed: {result.stderr[:200]}")
+                    # Continue anyway - some repos might not need all setup
+
+        # === PHASE: BASELINE ===
+        current_phase = Phase.BASELINE
+        write_jsonl(log_dir, PhaseTransition(Phase.SETUP, Phase.BASELINE).to_dict())
+
+        # Run baseline tests
+        print(f"\n[BASELINE] Running: {effective_test_cmd}")
+        v = _run_tests_in_sandbox(sb, effective_test_cmd, cfg, command_log)
+        baseline_output = (v.stdout or "") + "\n" + (v.stderr or "")
+
+        write_jsonl(log_dir, {
+            "phase": "baseline",
+            "tests_ok": v.ok,
+            "exit_code": v.exit_code,
+            "failing_tests": v.failing_tests,
+            "sig": v.sig,
+        })
+
+        if v.ok:
+            print(f"\n✅ SUCCESS! All tests passing at baseline.")
+            return {
+                "ok": True,
+                "sandbox": sb.root,
+                "repo_dir": sb.repo_dir,
+                "steps_taken": 0,
+                "phase": "baseline_pass",
+            }
+
+        # === PHASE: REPAIR_LOOP ===
+        current_phase = Phase.REPAIR_LOOP
+        write_jsonl(log_dir, PhaseTransition(Phase.BASELINE, Phase.REPAIR_LOOP).to_dict())
 
         # If fix_all mode, use unlimited steps
         max_iterations = float('inf') if cfg.fix_all else cfg.max_steps
@@ -341,8 +432,9 @@ def run_controller(cfg: ControllerConfig) -> Dict[str, Any]:
         while step < max_iterations:
             # Progress reporting
             print(f"\n[Step {step}] Running tests...")
-            # measure
-            v = run_tests(sb, cfg.test_cmd, timeout_sec=180)
+            v = _run_tests_in_sandbox(sb, effective_test_cmd, cfg, command_log)
+            final_output = (v.stdout or "") + "\n" + (v.stderr or "")
+
             print(f"[Step {step}] Tests: {'PASS' if v.ok else 'FAIL'} | Failing: {len(v.failing_tests)} tests")
             write_jsonl(log_dir, {
                 "phase": "measure",
@@ -352,15 +444,15 @@ def run_controller(cfg: ControllerConfig) -> Dict[str, Any]:
                 "failing_tests": v.failing_tests,
                 "sig": v.sig,
             })
+
+            # Update stall detector
+            top_test_id = v.failing_tests[0] if v.failing_tests else None
+            is_stalled = stall_state.update(len(v.failing_tests), top_test_id, v.sig)
+
             if v.ok:
                 print(f"\n✅ SUCCESS! All tests passing after {step} steps.")
-                return {
-                    "ok": True,
-                    "sandbox": sb.root,
-                    "repo_dir": sb.repo_dir,
-                    "steps_taken": step,
-                    "fix_all": cfg.fix_all,
-                }
+                current_phase = Phase.FINAL_VERIFY
+                break
 
             # Track progress for early termination
             current_failing = len(v.failing_tests)
@@ -373,43 +465,26 @@ def run_controller(cfg: ControllerConfig) -> Dict[str, Any]:
             # Early termination: no progress after N steps
             if steps_without_progress >= cfg.max_steps_without_progress:
                 print(f"\n❌ Early termination: No progress for {steps_without_progress} steps")
-                print(f"   Minimum failing tests: {min_failing_tests}, Current: {current_failing}")
-                return {
-                    "ok": False,
-                    "error": "no_progress",
-                    "sandbox": sb.root,
-                    "repo_dir": sb.repo_dir,
-                    "steps_taken": step,
-                    "min_failing_tests": min_failing_tests,
-                    "current_failing_tests": current_failing,
-                }
-
-            # Track signature for stall detection
-            sig_history.append(v.sig)
-            if len(sig_history) > 5:
-                sig_history.pop(0)
+                current_phase = Phase.BAILOUT
+                break
 
             # Track distinct signatures for multi-bug detection
             distinct_sigs.add(v.sig)
             if len(distinct_sigs) > 1:
                 print(f"[Step {step}] 🐛 Multi-bug detected: {len(distinct_sigs)} distinct error signatures")
 
-            # Detect stall: same sig repeats 3 times OR no progress after 3 patches
-            is_stalled = (
-                sig_history.count(v.sig) >= 3 or
-                (patch_attempts >= 3 and len(v.failing_tests) > 0)
-            )
+            # If stalled, force evidence gathering
+            if is_stalled:
+                write_jsonl(log_dir, {"phase": "stall_detected", "step": step, "sig": v.sig, "iterations_without_improvement": stall_state.iterations_without_improvement})
+                print(f"[Step {step}] ⚠️  Stall detected - switching to evidence gathering")
 
             # controller policy
-            pd = choose_policy(cfg.test_cmd, v)
-            print(f"[Step {step}] Intent: {pd.intent} | Subgoal: {pd.subgoal[:60]}...")
-
-            # If stalled, force evidence gathering
+            pd = choose_policy(effective_test_cmd, v)
             if is_stalled:
                 pd.intent = "gather_evidence"
                 pd.subgoal = "Collect more context: list_tree, grep for error symbols, read new files"
-                write_jsonl(log_dir, {"phase": "stall_detected", "step": step, "sig": v.sig, "patch_attempts": patch_attempts})
-                print(f"[Step {step}] ⚠️  Stall detected - switching to evidence gathering")
+
+            print(f"[Step {step}] Intent: {pd.intent} | Subgoal: {pd.subgoal[:60]}...")
 
             # gather high-signal files
             if is_quixbugs:
@@ -423,7 +498,7 @@ def run_controller(cfg: ControllerConfig) -> Dict[str, Any]:
                 "goal": "Make test command succeed (exit code 0).",
                 "intent": pd.intent,
                 "subgoal": pd.subgoal,
-                "test_cmd": cfg.test_cmd,
+                "test_cmd": effective_test_cmd,
                 "focus_test_cmd": pd.focus_test_cmd,
                 "failure_output": (v.stdout or "") + "\n" + (v.stderr or ""),
                 "repo_tree": repo_tree_text,
@@ -445,12 +520,17 @@ def run_controller(cfg: ControllerConfig) -> Dict[str, Any]:
                     # execute requested tools; then continue to next iteration
                     tool_results = []
                     obs_additions = []
-                    for req in (resp.get("requests") or [])[:6]:
+                    requests = resp.get("requests", [])[:6]
+
+                    # Filter requests through tool manager
+                    allowed_requests, blocked_reasons = tool_manager.filter_requests(requests)
+
+                    for req in allowed_requests:
                         tool = req.get("tool", "")
                         args = req.get("args", {}) if isinstance(req.get("args"), dict) else {}
                         tr = _execute_tool(sb, tool, args)
                         tool_results.append({"tool": tool, "args": args, "result": tr})
-                        
+
                         # Summarize for observations
                         summary = f"Tool: {tool}\n"
                         summary += f"Args: {args}\n"
@@ -469,102 +549,181 @@ def run_controller(cfg: ControllerConfig) -> Dict[str, Any]:
                                 summary += f"Found {len(matches)} matches\n"
                         if tool == "sandbox.list_tree" and tr.get("ok"):
                             files = tr.get("files", [])
-                            if files:
-                                summary += f"Listed {len(files)} files\n"
+                            summary += f"Listed {len(files)} files\n"
                         obs_additions.append(summary)
-                    
-                    # Append to observations buffer with sliding window
-                    if obs_additions:
-                        new_obs = "\n".join(obs_additions) + "\n"
-                        # Sliding window: keep only last 50,000 characters of observations
-                        # This prioritizes recent tool results over older context
-                        if len(observations) + len(new_obs) > 50000:
-                            # Keep the most recent 50,000 characters
-                            combined = observations + new_obs
-                            observations = combined[-50000:]
-                        else:
-                            observations += new_obs
-                    
-                    write_jsonl(log_dir, {"phase": "tools_executed", "step": step, "tool_results": tool_results})
-                    # after tool requests we do not patch; re-measure on next loop
-                    step += 1
-                    break
 
-                if mode == "patch":
-                    diff = resp.get("diff") or ""
-                    h = _diff_hash(diff)
-                    if not diff.strip() or h in bad_hashes:
-                        continue
-                    patches_to_evaluate.append((diff, t))
-
-            if patches_to_evaluate:
-                # Evaluate all patches in parallel
-                results = evaluate_patches_parallel(
-                    sb, patches_to_evaluate, pd.focus_test_cmd, cfg.test_cmd, max_workers=3
-                )
-                # Increment patch attempts counter
-                patch_attempts += len(patches_to_evaluate)
-                # Log all results
-                for res in results:
                     write_jsonl(log_dir, {
-                        "phase": "candidate_eval",
+                        "phase": "tool_execution",
                         "step": step,
-                        "temp": res.temperature,
-                        "hash": res.diff_hash,
-                        "ok": res.ok,
-                        "info": res.info[:15000],
+                        "temp": t,
+                        "results": tool_results,
+                        "blocked": blocked_reasons,
                     })
-                    if not res.ok:
-                        bad_hashes.add(res.diff_hash)
-                # Find first successful patch
-                winner_result = find_first_successful_patch(results)
-                if winner_result:
-                    winner = winner_result.diff
 
-            if not winner:
-                write_jsonl(log_dir, {"phase": "no_winner", "step": step})
-                continue
+                    # Append to observations buffer
+                    if obs_additions:
+                        observations += "\n" + "\n".join(obs_additions)
 
-            # apply winner to main repo
-            ap = apply_patch(sb, winner)
-            write_jsonl(log_dir, {"phase": "apply_winner", "step": step, "hash": _diff_hash(winner), "result": ap})
-            if not ap.get("ok"):
-                bad_hashes.add(_diff_hash(winner))
-                reset_hard(sb)
-                continue
-            
-            # Collect fine-tuning data if enabled
-            if cfg.collect_finetuning_data:
-                finetuning_entry = {
-                    "phase": "finetuning_data",
-                    "step": step,
-                    "github_url": cfg.github_url,
-                    "test_cmd": cfg.test_cmd,
-                    "failure_output": (v.stdout or "") + "\n" + (v.stderr or ""),
-                    "failing_tests": v.failing_tests,
-                    "error_signature": v.sig,
-                    "intent": pd.intent,
-                    "subgoal": pd.subgoal,
-                    "successful_patch": winner,
-                    "patch_hash": _diff_hash(winner),
-                    "files_used": [f.get("path") for f in files if f.get("ok")],
-                }
-                write_jsonl(log_dir, finetuning_entry)
-            
-            # after applying, loop continues; controller will re-measure
+                    # If we got tool requests, continue to next iteration
+                    if allowed_requests:
+                        break
 
-            # Increment step counter
+                elif mode == "patch":
+                    diff = resp.get("diff", "")
+                    if diff:
+                        dh = _diff_hash(diff)
+                        if dh in bad_hashes:
+                            print(f"[Step {step}] Skipping duplicate patch hash")
+                            continue
+                        bad_hashes.add(dh)
+                        patches_to_evaluate.append(diff)
+
+            # Evaluate patches
+            if patches_to_evaluate:
+                patch_attempts += 1
+                print(f"[Step {step}] Evaluating {len(patches_to_evaluate)} patch(es)...")
+
+                # Validate patch hygiene
+                valid_patches = []
+                for diff in patches_to_evaluate:
+                    hygiene_result = validate_patch_hygiene(diff, PatchHygieneConfig())
+                    if hygiene_result.is_valid:
+                        valid_patches.append(diff)
+                    else:
+                        print(f"[Step {step}] Patch rejected by hygiene gates: {hygiene_result.violations}")
+                        write_jsonl(log_dir, {
+                            "phase": "patch_rejected",
+                            "step": step,
+                            "reasons": hygiene_result.violations,
+                        })
+
+                if valid_patches:
+                    # Evaluate in parallel worktrees
+                    results = evaluate_patches_parallel(
+                        sb, valid_patches, effective_test_cmd,
+                        temps=cfg.temps, timeout_sec=cfg.focus_timeout,
+                        use_docker=not cfg.unsafe_host_exec,
+                        docker_image=cfg.docker_image,
+                    )
+
+                    winner = find_first_successful_patch(results)
+                    if winner:
+                        print(f"[Step {step}] ✅ Found winning patch!")
+                        write_jsonl(log_dir, {"phase": "winner_found", "step": step, "winner_hash": _diff_hash(winner)})
+                        # Apply winner to main repo
+                        apply_patch(sb, winner)
+                        winner_diff = winner
+                        break
+                    else:
+                        print(f"[Step {step}] No patch passed verification")
+                        write_jsonl(log_dir, {"phase": "no_winner", "step": step, "attempted": len(valid_patches)})
+
             step += 1
 
+        # === PHASE: FINAL_VERIFY ===
+        if current_phase == Phase.FINAL_VERIFY:
+            write_jsonl(log_dir, PhaseTransition(Phase.REPAIR_LOOP, Phase.FINAL_VERIFY).to_dict())
+
+            print(f"\n[FINAL_VERIFY] Running full test suite...")
+            v = _run_tests_in_sandbox(sb, effective_test_cmd, cfg, command_log)
+            final_output = (v.stdout or "") + "\n" + (v.stderr or "")
+
+            if v.ok:
+                print(f"\n✅ FINAL SUCCESS! All tests passing.")
+            else:
+                print(f"\n⚠️  Final verify failed: {len(v.failing_tests)} failing tests")
+                current_phase = Phase.BAILOUT
+
+        # === PHASE: EVIDENCE_PACK ===
+        current_phase = Phase.EVIDENCE_PACK
+        write_jsonl(log_dir, PhaseTransition(Phase.FINAL_VERIFY, Phase.EVIDENCE_PACK).to_dict())
+
+        # Export evidence pack
+        state_dict = {
+            "config": cfg.__dict__,
+            "project_type": project_type.name if project_type else None,
+            "setup_commands": setup_commands,
+            "effective_test_cmd": effective_test_cmd,
+            "steps_taken": step,
+            "patch_attempts": patch_attempts,
+            "min_failing_tests": min_failing_tests,
+            "final_failing_tests": len(v.failing_tests) if not v.ok else 0,
+            "final_ok": v.ok,
+        }
+
+        pack_dir = evidence_exporter.export(
+            sandbox_root=sb.root,
+            log_dir=log_dir,
+            baseline_output=baseline_output,
+            final_output=final_output,
+            winner_diff=winner_diff,
+            state=state_dict,
+            command_log=command_log,
+        )
+
+        print(f"\n[EVIDENCE_PACK] Exported to: {pack_dir}")
+
         return {
-            "ok": False,
-            "error": "max_steps_reached",
+            "ok": v.ok,
             "sandbox": sb.root,
             "repo_dir": sb.repo_dir,
             "steps_taken": step,
-            "fix_all": cfg.fix_all,
+            "evidence_pack": pack_dir,
+            "winner_diff": winner_diff,
         }
-    finally:
-        # Note: sandbox is not destroyed automatically for inspection. Uncomment to auto-clean.
-        # destroy_sandbox(sb)
-        pass
+
+    except Exception as e:
+        return {
+            "ok": False,
+            "error": f"Exception: {e}",
+            "sandbox": sb.root,
+            "repo_dir": sb.repo_dir,
+        }
+
+
+def _run_tests_in_sandbox(
+    sb: Sandbox,
+    test_cmd: str,
+    cfg: ControllerConfig,
+    command_log: List[Dict[str, Any]],
+) -> VerifyResult:
+    """Run tests in Docker or on host based on configuration.
+
+    Args:
+        sb: The sandbox.
+        test_cmd: Test command to run.
+        cfg: Controller configuration.
+        command_log: Command execution log.
+
+    Returns:
+        VerifyResult with test results.
+    """
+    if cfg.unsafe_host_exec:
+        # Run on host (unsafe)
+        return run_tests(sb, test_cmd, timeout_sec=cfg.focus_timeout)
+    else:
+        # Run in Docker with network OFF
+        result = docker_test(sb, test_cmd, timeout_sec=cfg.focus_timeout, docker_image=cfg.docker_image)
+
+        command_log.append({
+            "phase": "test",
+            "command": test_cmd,
+            "exit_code": result.exit_code,
+            "ok": result.ok,
+            "stdout": result.stdout[:2000],
+            "stderr": result.stderr[:2000],
+            "timed_out": result.timed_out,
+        })
+
+        # Convert DockerResult to VerifyResult
+        from .parsers import parse_pytest_failures, error_signature
+        failing_tests = parse_pytest_failures(result.stdout + result.stderr)
+        sig = error_signature(result.stdout, result.stderr)
+        return VerifyResult(
+            ok=result.ok,
+            exit_code=result.exit_code,
+            stdout=result.stdout,
+            stderr=result.stderr,
+            failing_tests=failing_tests,
+            sig=sig,
+        )
