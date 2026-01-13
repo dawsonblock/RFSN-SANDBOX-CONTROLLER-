@@ -53,8 +53,8 @@ def main() -> None:
     )
     parser.add_argument(
         "--model",
-        default=os.getenv("GEMINI_MODEL", "gemini-2.0-flash-exp"),
-        help="Gemini model to use (default: gemini-2.0-flash-exp, or GEMINI_MODEL env var)",
+        default=os.getenv("GEMINI_MODEL", "gemini-3.0-flash-exp"),
+        help="Gemini model to use (default: gemini-3.0-flash-exp, or GEMINI_MODEL env var)",
     )
     parser.add_argument(
         "--max-minutes",

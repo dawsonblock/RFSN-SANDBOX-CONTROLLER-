@@ -284,7 +284,7 @@ class ControllerConfig:
     fix_all: bool = False
     max_steps_without_progress: int = 10
     collect_finetuning_data: bool = False
-    model: str = "gemini-2.0-flash-exp"
+    model: str = "gemini-3.0-flash-exp"
     max_minutes: int = 30
     install_timeout: int = 300
     focus_timeout: int = 120
@@ -621,12 +621,16 @@ def run_controller(cfg: ControllerConfig) -> Dict[str, Any]:
         # === PHASE: SETUP VALIDATION ===
         # Create setup report and check if we should bail out
         setup_report = create_setup_report(
-            setup_results=setup_results,
+            pip_result=setup_results.get("pip"),
+            node_result=setup_results.get("node"),
+            go_result=setup_results.get("go"),
+            rust_result=setup_results.get("rust"),
+            java_result=setup_results.get("java"),
+            dotnet_result=setup_results.get("dotnet"),
             lockfile_path=lockfile_path,
             sysdeps_installed=sysdeps_installed,
             sysdeps_failed=[],
             sysdeps_blocked=sysdeps_blocked,
-            sysdeps_missing=[],
         )
 
         write_jsonl(log_dir, {
