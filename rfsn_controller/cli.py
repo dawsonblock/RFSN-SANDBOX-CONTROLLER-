@@ -139,6 +139,39 @@ def main() -> None:
         action="store_true",
         help="Clone + detect + setup + baseline test, then exit (no repair loop)",
     )
+    parser.add_argument(
+        "--project-type",
+        default="auto",
+        choices=["auto", "python", "node", "go", "rust", "java", "dotnet"],
+        help="Project type (default: auto-detect)",
+    )
+    parser.add_argument(
+        "--buildpack",
+        default="auto",
+        help="Docker buildpack image (default: auto-select based on project type)",
+    )
+    parser.add_argument(
+        "--enable-sysdeps",
+        action="store_true",
+        help="Enable automatic system dependency installation (SYSDEPS phase)",
+    )
+    parser.add_argument(
+        "--sysdeps-tier",
+        default="4",
+        choices=["0", "1", "2", "3", "4", "5", "6", "7"],
+        help="Maximum APT tier for system dependencies (default: 4)",
+    )
+    parser.add_argument(
+        "--sysdeps-max-packages",
+        type=int,
+        default=10,
+        help="Maximum number of system packages to install (default: 10)",
+    )
+    parser.add_argument(
+        "--build-cmd",
+        default=None,
+        help="Build command for verification (e.g., 'npm run build')",
+    )
     args = parser.parse_args()
 
     cfg = ControllerConfig(
@@ -165,6 +198,12 @@ def main() -> None:
         typecheck_cmd=args.typecheck_cmd,
         repro_cmd=args.repro_cmd,
         dry_run=args.dry_run,
+        project_type=args.project_type,
+        buildpack=args.buildpack,
+        enable_sysdeps=args.enable_sysdeps,
+        sysdeps_tier=int(args.sysdeps_tier),
+        sysdeps_max_packages=args.sysdeps_max_packages,
+        build_cmd=args.build_cmd,
     )
     result = run_controller(cfg)
     print(result)

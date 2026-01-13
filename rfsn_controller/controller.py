@@ -52,6 +52,14 @@ from .phases import Phase, PhaseTransition
 from .project_detection import detect_project_type, get_setup_commands, get_default_test_command
 from .stall_detector import StallState
 from .evidence_pack import EvidencePackExporter, EvidencePackConfig
+from .model_validator import ModelOutputValidator
+from .winner_selection import score_patch
+from .project_detector import ProjectDetector, ProjectType
+from .language_templates import Language, get_buildpack_image
+from .apt_whitelist import AptWhitelist, AptTier
+from .sysdeps_installer import SysdepsInstaller
+from .trace_parser import TraceParser
+from .goals import GoalSetFactory
 
 
 FORBIDDEN_PREFIXES = [".git/", "node_modules/", ".venv/", "venv/", "__pycache__/"]
@@ -269,25 +277,31 @@ class ControllerConfig:
     ref: Optional[str] = None
     max_steps: int = 12
     temps: List[float] = field(default_factory=lambda: [0.0, 0.2, 0.4])
-    fix_all: bool = False  # Continue until all tests pass
-    max_steps_without_progress: int = 10  # Early termination if no progress
-    collect_finetuning_data: bool = False  # Collect successful patches for fine-tuning
-    model: str = "gemini-2.0-flash-exp"  # Model to use for generation
-    max_minutes: int = 30  # Total time budget in minutes
-    install_timeout: int = 300  # Timeout for dependency installation
-    focus_timeout: int = 120  # Timeout for focused test runs
-    full_timeout: int = 300  # Timeout for full test suite runs
-    max_tool_calls: int = 40  # Maximum total tool calls per run
-    docker_image: str = "python:3.11-slim"  # Docker image for sandboxed execution
-    unsafe_host_exec: bool = False  # Allow running commands on host instead of Docker
-    cpu: float = 2.0  # Docker CPU limit
-    mem_mb: int = 4096  # Docker memory limit in MB
-    pids: int = 256  # Docker process ID limit
-    docker_readonly: bool = False  # Mount repo as read-only with /tmp as tmpfs
-    lint_cmd: Optional[str] = None  # Lint command for verification
-    typecheck_cmd: Optional[str] = None  # Typecheck command for verification
-    repro_cmd: Optional[str] = None  # Repro command for verification
-    dry_run: bool = False  # Clone + detect + setup + baseline, then exit
+    fix_all: bool = False
+    max_steps_without_progress: int = 10
+    collect_finetuning_data: bool = False
+    model: str = "gemini-2.0-flash-exp"
+    max_minutes: int = 30
+    install_timeout: int = 300
+    focus_timeout: int = 120
+    full_timeout: int = 300
+    max_tool_calls: int = 40
+    docker_image: str = "python:3.11-slim"
+    unsafe_host_exec: bool = False
+    cpu: float = 2.0
+    mem_mb: int = 4096
+    pids: int = 256
+    docker_readonly: bool = False
+    lint_cmd: Optional[str] = None
+    typecheck_cmd: Optional[str] = None
+    repro_cmd: Optional[str] = None
+    dry_run: bool = False
+    project_type: str = "auto"
+    buildpack: str = "auto"
+    enable_sysdeps: bool = False
+    sysdeps_tier: int = 4
+    sysdeps_max_packages: int = 10
+    build_cmd: Optional[str] = None
 
 
 def run_controller(cfg: ControllerConfig) -> Dict[str, Any]:
@@ -357,7 +371,57 @@ def run_controller(cfg: ControllerConfig) -> Dict[str, Any]:
         current_phase = Phase.DETECT
         write_jsonl(log_dir, PhaseTransition(Phase.INGEST, Phase.DETECT).to_dict())
 
-        # Detect project type
+        # V3: Use new ProjectDetector for multi-language support
+        try:
+            v3_detector = ProjectDetector(sb.repo_dir)
+            v3_detection = v3_detector.detect()
+
+            # Override project type if specified
+            if cfg.project_type != "auto":
+                type_map = {
+                    "python": ProjectType.PYTHON,
+                    "node": ProjectType.NODE,
+                    "go": ProjectType.GO,
+                    "rust": ProjectType.RUST,
+                    "java": ProjectType.JAVA,
+                    "dotnet": ProjectType.DOTNET,
+                }
+                if cfg.project_type in type_map:
+                    v3_detection.project_type = type_map[cfg.project_type]
+
+            # Select buildpack image
+            if cfg.buildpack == "auto":
+                lang_map = {
+                    ProjectType.PYTHON: Language.PYTHON,
+                    ProjectType.NODE: Language.NODE,
+                    ProjectType.GO: Language.GO,
+                    ProjectType.RUST: Language.RUST,
+                    ProjectType.JAVA: Language.JAVA,
+                    ProjectType.DOTNET: Language.DOTNET,
+                }
+                lang = lang_map.get(v3_detection.project_type, Language.PYTHON)
+                selected_buildpack = get_buildpack_image(lang)
+            else:
+                selected_buildpack = cfg.buildpack
+
+            write_jsonl(log_dir, {
+                "phase": "v3_detect",
+                "project_type": v3_detection.project_type.value,
+                "install_strategy": v3_detection.install_strategy,
+                "test_strategy": v3_detection.test_strategy,
+                "build_strategy": v3_detection.build_strategy,
+                "requires_services": v3_detection.requires_services,
+                "system_deps_hint": v3_detection.system_deps_hint,
+                "confidence": v3_detection.confidence,
+                "selected_buildpack": selected_buildpack,
+            })
+        except Exception as e:
+            # Fallback to old detection if v3 fails
+            v3_detection = None
+            selected_buildpack = cfg.docker_image
+            write_jsonl(log_dir, {"phase": "v3_detect", "error": str(e)})
+
+        # Legacy detection for backward compatibility
         project_type = detect_project_type(sb.repo_dir)
         setup_commands = get_setup_commands(sb.repo_dir)
         detected_test_cmd = get_default_test_command(sb.repo_dir)
@@ -401,6 +465,55 @@ def run_controller(cfg: ControllerConfig) -> Dict[str, Any]:
                 if not result.ok:
                     print(f"[SETUP] Failed: {result.stderr[:200]}")
                     # Continue anyway - some repos might not need all setup
+
+        # === PHASE: SYSDEPS (V3) ===
+        if cfg.enable_sysdeps and v3_detection and v3_detection.system_deps_hint:
+            current_phase = Phase.SETUP
+            write_jsonl(log_dir, {"phase": "sysdeps", "enabled": True})
+
+            tier_map = {
+                0: AptTier.TIER_0,
+                1: AptTier.TIER_1,
+                2: AptTier.TIER_2,
+                3: AptTier.TIER_3,
+                4: AptTier.TIER_4,
+                5: AptTier.TIER_5,
+                6: AptTier.TIER_6,
+                7: AptTier.TIER_7,
+            }
+            whitelist = AptWhitelist(
+                max_packages=cfg.sysdeps_max_packages,
+                max_tier=tier_map.get(cfg.sysdeps_tier, AptTier.TIER_4),
+                allow_wildcards=False,
+            )
+
+            installer = SysdepsInstaller(
+                whitelist=whitelist,
+                dry_run=False,
+            )
+
+            print("[SYSDEPS] Installing system dependencies...")
+            sysdeps_result = installer.install(
+                packages=[],
+                hints=v3_detection.system_deps_hint,
+            )
+
+            write_jsonl(log_dir, {
+                "phase": "sysdeps",
+                "result": {
+                    "success": sysdeps_result.success,
+                    "installed": sysdeps_result.installed_packages,
+                    "blocked": sysdeps_result.blocked_packages,
+                    "error": sysdeps_result.error_message,
+                },
+            })
+
+            if sysdeps_result.success:
+                print(f"[SYSDEPS] Installed: {sysdeps_result.installed_packages}")
+            else:
+                print(f"[SYSDEPS] Failed: {sysdeps_result.error_message}")
+                if sysdeps_result.blocked_packages:
+                    print(f"[SYSDEPS] Blocked packages: {sysdeps_result.blocked_packages}")
 
         # === PHASE: BASELINE ===
         current_phase = Phase.BASELINE

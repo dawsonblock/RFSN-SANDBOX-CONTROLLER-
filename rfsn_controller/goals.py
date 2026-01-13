@@ -1,0 +1,394 @@
+"""Enhanced goal types beyond just tests.
+
+Supports multiple goal types: tests, build, lint, repro, static check.
+"""
+
+from dataclasses import dataclass
+from typing import Optional, List
+from enum import Enum
+
+
+class GoalType(Enum):
+    """Types of goals the controller can satisfy."""
+    TEST = "test"  # Tests pass
+    BUILD = "build"  # Build succeeds
+    LINT = "lint"  # Linting passes
+    TYPECHECK = "typecheck"  # Type checking passes
+    STATIC_CHECK = "static_check"  # Static analysis passes
+    REPRO = "repro"  # Repro script exits 0
+    CUSTOM = "custom"  # Custom command
+
+
+@dataclass
+class Goal:
+    """A goal that the controller needs to satisfy."""
+
+    goal_type: GoalType
+    command: str
+    description: str
+    timeout: int = 300
+    required: bool = True
+
+
+class GoalFactory:
+    """Creates goals based on project type and user preferences."""
+
+    @staticmethod
+    def create_test_goal(
+        command: str,
+        timeout: int = 300,
+    ) -> Goal:
+        """Create a test goal.
+
+        Args:
+            command: Test command to run.
+            timeout: Timeout in seconds.
+
+        Returns:
+            Goal instance.
+        """
+        return Goal(
+            goal_type=GoalType.TEST,
+            command=command,
+            description="All tests pass",
+            timeout=timeout,
+            required=True,
+        )
+
+    @staticmethod
+    def create_build_goal(
+        command: str,
+        timeout: int = 300,
+        required: bool = True,
+    ) -> Goal:
+        """Create a build goal.
+
+        Args:
+            command: Build command to run.
+            timeout: Timeout in seconds.
+            required: Whether this goal must pass.
+
+        Returns:
+            Goal instance.
+        """
+        return Goal(
+            goal_type=GoalType.BUILD,
+            command=command,
+            description="Build succeeds",
+            timeout=timeout,
+            required=required,
+        )
+
+    @staticmethod
+    def create_lint_goal(
+        command: str,
+        timeout: int = 120,
+        required: bool = False,
+    ) -> Goal:
+        """Create a lint goal.
+
+        Args:
+            command: Lint command to run.
+            timeout: Timeout in seconds.
+            required: Whether this goal must pass.
+
+        Returns:
+            Goal instance.
+        """
+        return Goal(
+            goal_type=GoalType.LINT,
+            command=command,
+            description="Linting passes",
+            timeout=timeout,
+            required=required,
+        )
+
+    @staticmethod
+    def create_typecheck_goal(
+        command: str,
+        timeout: int = 120,
+        required: bool = False,
+    ) -> Goal:
+        """Create a typecheck goal.
+
+        Args:
+            command: Typecheck command to run.
+            timeout: Timeout in seconds.
+            required: Whether this goal must pass.
+
+        Returns:
+            Goal instance.
+        """
+        return Goal(
+            goal_type=GoalType.TYPECHECK,
+            command=command,
+            description="Type checking passes",
+            timeout=timeout,
+            required=required,
+        )
+
+    @staticmethod
+    def create_repro_goal(
+        command: str,
+        timeout: int = 300,
+    ) -> Goal:
+        """Create a repro goal.
+
+        Args:
+            command: Repro script command.
+            timeout: Timeout in seconds.
+
+        Returns:
+            Goal instance.
+        """
+        return Goal(
+            goal_type=GoalType.REPRO,
+            command=command,
+            description="Repro script succeeds",
+            timeout=timeout,
+            required=True,
+        )
+
+    @staticmethod
+    def create_custom_goal(
+        command: str,
+        description: str,
+        timeout: int = 300,
+        required: bool = True,
+    ) -> Goal:
+        """Create a custom goal.
+
+        Args:
+            command: Custom command to run.
+            description: Description of the goal.
+            timeout: Timeout in seconds.
+            required: Whether this goal must pass.
+
+        Returns:
+            Goal instance.
+        """
+        return Goal(
+            goal_type=GoalType.CUSTOM,
+            command=command,
+            description=description,
+            timeout=timeout,
+            required=required,
+        )
+
+
+@dataclass
+class GoalSet:
+    """A set of goals to satisfy."""
+
+    primary_goal: Goal
+    verification_goals: List[Goal]
+
+    def get_all_goals(self) -> List[Goal]:
+        """Get all goals (primary + verification).
+
+        Returns:
+            List of all goals.
+        """
+        return [self.primary_goal] + self.verification_goals
+
+    def get_required_goals(self) -> List[Goal]:
+        """Get only required goals.
+
+        Returns:
+            List of required goals.
+        """
+        return [g for g in self.get_all_goals() if g.required]
+
+
+class GoalSetFactory:
+    """Creates goal sets based on project type."""
+
+    @staticmethod
+    def for_python(
+        test_cmd: str = "python -m pytest -q",
+        lint_cmd: Optional[str] = None,
+        typecheck_cmd: Optional[str] = None,
+        repro_cmd: Optional[str] = None,
+    ) -> GoalSet:
+        """Create goal set for Python project.
+
+        Args:
+            test_cmd: Test command.
+            lint_cmd: Optional lint command.
+            typecheck_cmd: Optional typecheck command.
+            repro_cmd: Optional repro command.
+
+        Returns:
+            GoalSet instance.
+        """
+        primary = GoalFactory.create_test_goal(test_cmd)
+
+        verification = []
+        if lint_cmd:
+            verification.append(
+                GoalFactory.create_lint_goal(lint_cmd, required=False)
+            )
+        if typecheck_cmd:
+            verification.append(
+                GoalFactory.create_typecheck_goal(typecheck_cmd, required=False)
+            )
+        if repro_cmd:
+            verification.append(GoalFactory.create_repro_goal(repro_cmd))
+
+        return GoalSet(primary_goal=primary, verification_goals=verification)
+
+    @staticmethod
+    def for_node(
+        test_cmd: str = "npm test",
+        build_cmd: Optional[str] = None,
+        lint_cmd: Optional[str] = None,
+    ) -> GoalSet:
+        """Create goal set for Node.js project.
+
+        Args:
+            test_cmd: Test command.
+            build_cmd: Optional build command.
+            lint_cmd: Optional lint command.
+
+        Returns:
+            GoalSet instance.
+        """
+        primary = GoalFactory.create_test_goal(test_cmd)
+
+        verification = []
+        if build_cmd:
+            verification.append(
+                GoalFactory.create_build_goal(build_cmd, required=False)
+            )
+        if lint_cmd:
+            verification.append(
+                GoalFactory.create_lint_goal(lint_cmd, required=False)
+            )
+
+        return GoalSet(primary_goal=primary, verification_goals=verification)
+
+    @staticmethod
+    def for_go(
+        test_cmd: str = "go test ./...",
+        build_cmd: Optional[str] = None,
+    ) -> GoalSet:
+        """Create goal set for Go project.
+
+        Args:
+            test_cmd: Test command.
+            build_cmd: Optional build command.
+
+        Returns:
+            GoalSet instance.
+        """
+        primary = GoalFactory.create_test_goal(test_cmd)
+
+        verification = []
+        if build_cmd:
+            verification.append(
+                GoalFactory.create_build_goal(build_cmd, required=False)
+            )
+
+        return GoalSet(primary_goal=primary, verification_goals=verification)
+
+    @staticmethod
+    def for_rust(
+        test_cmd: str = "cargo test",
+        build_cmd: Optional[str] = None,
+        lint_cmd: Optional[str] = None,
+    ) -> GoalSet:
+        """Create goal set for Rust project.
+
+        Args:
+            test_cmd: Test command.
+            build_cmd: Optional build command.
+            lint_cmd: Optional lint command.
+
+        Returns:
+            GoalSet instance.
+        """
+        primary = GoalFactory.create_test_goal(test_cmd)
+
+        verification = []
+        if build_cmd:
+            verification.append(
+                GoalFactory.create_build_goal(build_cmd, required=False)
+            )
+        if lint_cmd:
+            verification.append(
+                GoalFactory.create_lint_goal(lint_cmd, required=False)
+            )
+
+        return GoalSet(primary_goal=primary, verification_goals=verification)
+
+    @staticmethod
+    def for_java(
+        test_cmd: str = "mvn test",
+        build_cmd: Optional[str] = None,
+    ) -> GoalSet:
+        """Create goal set for Java project.
+
+        Args:
+            test_cmd: Test command.
+            build_cmd: Optional build command.
+
+        Returns:
+            GoalSet instance.
+        """
+        primary = GoalFactory.create_test_goal(test_cmd)
+
+        verification = []
+        if build_cmd:
+            verification.append(
+                GoalFactory.create_build_goal(build_cmd, required=False)
+            )
+
+        return GoalSet(primary_goal=primary, verification_goals=verification)
+
+    @staticmethod
+    def for_dotnet(
+        test_cmd: str = "dotnet test",
+        build_cmd: Optional[str] = None,
+    ) -> GoalSet:
+        """Create goal set for .NET project.
+
+        Args:
+            test_cmd: Test command.
+            build_cmd: Optional build command.
+
+        Returns:
+            GoalSet instance.
+        """
+        primary = GoalFactory.create_test_goal(test_cmd)
+
+        verification = []
+        if build_cmd:
+            verification.append(
+                GoalFactory.create_build_goal(build_cmd, required=False)
+            )
+
+        return GoalSet(primary_goal=primary, verification_goals=verification)
+
+    @staticmethod
+    def for_build_only(
+        build_cmd: str,
+        lint_cmd: Optional[str] = None,
+    ) -> GoalSet:
+        """Create goal set for project without tests.
+
+        Args:
+            build_cmd: Build command.
+            lint_cmd: Optional lint command.
+
+        Returns:
+            GoalSet instance.
+        """
+        primary = GoalFactory.create_build_goal(build_cmd)
+
+        verification = []
+        if lint_cmd:
+            verification.append(
+                GoalFactory.create_lint_goal(lint_cmd, required=False)
+            )
+
+        return GoalSet(primary_goal=primary, verification_goals=verification)
