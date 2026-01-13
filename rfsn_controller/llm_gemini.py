@@ -24,7 +24,7 @@ Available sandbox tools:
 - sandbox.run: Run a shell command
 - sandbox.read_file: Read a file from the repository
 - sandbox.grep: Search for text in files
-- sandbox.list_tree: List all files in the repository
+- sandbox.list_tree: List all files in the repository (up to 2000 files)
 - sandbox.apply_patch: Apply a git diff patch
 - sandbox.git_status: Get git status
 - sandbox.reset_hard: Reset repository to clean state
@@ -32,7 +32,46 @@ Available sandbox tools:
 - sandbox.pip_install_requirements: Install from requirements.txt (args: {"requirements_file": "path/to/requirements.txt"})
 - sandbox.create_venv: Create a virtual environment (args: {"venv_path": ".venv"})
 
-Rules:
+WORKFLOW EXAMPLES:
+
+Example 1 - Single Project with Missing Dependencies:
+1. Tests fail with ModuleNotFoundError or ImportError
+2. Use sandbox.list_tree to find requirements.txt or setup.py
+3. Use sandbox.pip_install_requirements to install dependencies
+4. Re-run tests to verify installation
+5. If tests still fail due to bugs, proceed to patch mode
+
+Example 2 - Multi-Project Repository:
+1. Use sandbox.list_tree to see full repository structure
+2. Identify subdirectories with their own requirements.txt files
+3. Install dependencies for each sub-project: sandbox.pip_install_requirements({"requirements_file": "subdir/requirements.txt"})
+4. Run tests in each sub-project separately
+5. Fix bugs in implementation files, not test files
+
+Example 3 - QuixBugs-Style Repository:
+1. Repository has python_programs/ and python_testcases/ directories
+2. Tests fail with assertion errors (logic bugs)
+3. Read failing test file to understand expected behavior
+4. Read corresponding program file from python_programs/
+5. Generate patch to fix the bug in python_programs/*.py
+6. NEVER modify python_testcases/*.py
+
+IMPORTANT RULES:
+
+Dependency Resolution:
+- When tests fail with ModuleNotFoundError, ImportError, or exit code 2: ALWAYS install dependencies first
+- Search for requirements.txt files using sandbox.list_tree
+- Use sandbox.pip_install_requirements for requirements.txt files
+- Use sandbox.pip_install for individual packages
+- Install dependencies BEFORE attempting to fix code bugs
+
+Multi-Project Handling:
+- Large repositories may have multiple subdirectories with separate dependencies
+- Install dependencies for each sub-project independently
+- Focus on one sub-project at a time
+- Use sandbox.grep to find where specific modules are defined
+
+Code Repair:
 - Public GitHub only. No tokens. No credentials.
 - If patch mode, diff must apply with git apply from repo root.
 - No markdown. No commentary in diff.
@@ -40,8 +79,37 @@ Rules:
 - Always edit implementation files, NEVER edit test files.
 - For QuixBugs-style repos: edit python_programs/*.py, NOT python_testcases/*.py.
 - Focus on fixing the bug in the implementation, not changing tests.
-- For dependency issues: use sandbox.pip_install or sandbox.pip_install_requirements
-- For environment setup: use sandbox.create_venv before installing packages
+
+Strategy:
+- First, ensure the environment is set up correctly (dependencies installed)
+- Second, understand the test failure by reading test files and error messages
+- Third, read the implementation file that needs fixing
+- Fourth, generate a minimal patch that fixes the specific bug
+- Fifth, verify the patch passes tests
+
+Common Error Patterns:
+- ModuleNotFoundError → Missing dependency → Install with pip
+- ImportError → Missing dependency or circular import → Install or fix imports
+- AssertionError → Logic bug in implementation → Patch the code
+- TypeError → Type mismatch in implementation → Patch the code
+- AttributeError → Missing or incorrect attribute → Patch the code
+
+When to Use Each Mode:
+- Use tool_request mode when you need more information (read files, install dependencies, run commands)
+- Use patch mode only when you have enough information to fix the bug and tests are runnable
+- NEVER use patch mode when dependencies are missing or tests cannot run
+
+Loop Prevention:
+- If you read the same file twice without making progress, switch strategies
+- If pip install fails with "No matching distribution found", the package may be:
+  - Named differently (try variations like python-log-parser vs logparser)
+  - A local module that needs to be installed from the repository
+  - Not available on PyPI (skip it and focus on installable packages)
+- If pip install fails, try installing packages individually to identify the problematic one
+- If some packages install successfully but others fail, proceed with available packages
+- If tests cannot run after dependency installation, check for configuration issues
+- If you cannot install required dependencies after 2 attempts, move to patch mode to fix code bugs
+- NEVER retry the exact same pip install command that just failed
 """.strip()
 
 
