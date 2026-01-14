@@ -57,6 +57,32 @@ def main() -> None:
         help="Model to use (default: deepseek-chat, or RFSN_MODEL env var)",
     )
     parser.add_argument(
+        "--time-mode",
+        default="frozen",
+        choices=["frozen", "live"],
+        help="Time mode for determinism (default: frozen)",
+    )
+    parser.add_argument(
+        "--run-started-at-utc",
+        default=None,
+        help="Optional ISO-8601 UTC timestamp for deterministic replay",
+    )
+    parser.add_argument(
+        "--time-seed",
+        type=int,
+        default=None,
+        help="Optional integer seed used for deterministic run metadata",
+    )
+    parser.add_argument(
+        "--rng-seed",
+        type=int,
+        default=None,
+        help=(
+            "Optional integer seed for Python/NumPy RNG "
+            "(deterministic replay)"
+        ),
+    )
+    parser.add_argument(
         "--max-minutes",
         type=int,
         default=30,
@@ -89,12 +115,18 @@ def main() -> None:
     parser.add_argument(
         "--docker-image",
         default="python:3.11-slim",
-        help="Docker image for sandboxed execution (default: python:3.11-slim)",
+        help=(
+            "Docker image for sandboxed execution "
+            "(default: python:3.11-slim)"
+        ),
     )
     parser.add_argument(
         "--unsafe-host-exec",
         action="store_true",
-        help="Allow running commands on host instead of Docker (DANGEROUS, not recommended)",
+        help=(
+            "Allow running commands on host instead of Docker "
+            "(DANGEROUS, not recommended)"
+        ),
     )
     parser.add_argument(
         "--cpu",
@@ -137,7 +169,10 @@ def main() -> None:
     parser.add_argument(
         "--dry-run",
         action="store_true",
-        help="Clone + detect + setup + baseline test, then exit (no repair loop)",
+        help=(
+            "Clone + detect + setup + baseline test, then exit "
+            "(no repair loop)"
+        ),
     )
     parser.add_argument(
         "--project-type",
@@ -148,7 +183,10 @@ def main() -> None:
     parser.add_argument(
         "--buildpack",
         default="auto",
-        help="Docker buildpack image (default: auto-select based on project type)",
+        help=(
+            "Docker buildpack image "
+            "(default: auto-select based on project type)"
+        ),
     )
     parser.add_argument(
         "--enable-sysdeps",
@@ -172,6 +210,38 @@ def main() -> None:
         default=None,
         help="Build command for verification (e.g., 'npm run build')",
     )
+    parser.add_argument(
+        "--learning-db",
+        default=None,
+        help=(
+            "Path to SQLite DB for controller-owned learning "
+            "(disabled if omitted)"
+        ),
+    )
+    parser.add_argument(
+        "--learning-half-life-days",
+        type=int,
+        default=14,
+        help=(
+            "Decay half-life for learning weights in record-age units "
+            "(default: 14)"
+        ),
+    )
+    parser.add_argument(
+        "--learning-max-age-days",
+        type=int,
+        default=90,
+        help=(
+            "Drop learning records older than N record-age units "
+            "(default: 90)"
+        ),
+    )
+    parser.add_argument(
+        "--learning-max-rows",
+        type=int,
+        default=20000,
+        help="Maximum number of learning rows to retain (default: 20000)",
+    )
     args = parser.parse_args()
 
     cfg = ControllerConfig(
@@ -183,6 +253,10 @@ def main() -> None:
         max_steps_without_progress=args.max_steps_without_progress,
         collect_finetuning_data=args.collect_finetuning_data,
         model=args.model,
+        time_mode=args.time_mode,
+        run_started_at_utc=args.run_started_at_utc,
+        time_seed=args.time_seed,
+        rng_seed=args.rng_seed,
         max_minutes=args.max_minutes,
         install_timeout=args.install_timeout,
         focus_timeout=args.focus_timeout,
@@ -204,6 +278,10 @@ def main() -> None:
         sysdeps_tier=int(args.sysdeps_tier),
         sysdeps_max_packages=args.sysdeps_max_packages,
         build_cmd=args.build_cmd,
+        learning_db_path=args.learning_db,
+        learning_half_life_days=args.learning_half_life_days,
+        learning_max_age_days=args.learning_max_age_days,
+        learning_max_rows=args.learning_max_rows,
     )
     result = run_controller(cfg)
     print(result)

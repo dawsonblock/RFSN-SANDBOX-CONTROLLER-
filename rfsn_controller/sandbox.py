@@ -14,7 +14,7 @@ import subprocess
 import tempfile
 import uuid
 from dataclasses import dataclass
-from typing import Dict, Any, Tuple, List
+from typing import Dict, Any, Tuple, List, Optional
 import shlex
 
 from .command_allowlist import is_command_allowed
@@ -72,13 +72,17 @@ def _run(cmd: str, cwd: str, timeout_sec: int = 120) -> Tuple[int, str, str]:
     return p.returncode, p.stdout, p.stderr
 
 
-def create_sandbox() -> Sandbox:
+def create_sandbox(*, run_id: Optional[str] = None) -> Sandbox:
     """Create a new disposable sandbox directory.
 
     Returns:
         A Sandbox object with paths configured.
     """
-    root = os.path.join(tempfile.gettempdir(), f"rfsn_sb_{uuid.uuid4().hex[:10]}")
+    if run_id:
+        root = os.path.join(tempfile.gettempdir(), f"rfsn_sb_{run_id}")
+    else:
+        suffix = uuid.uuid4().hex[:10]
+        root = os.path.join(tempfile.gettempdir(), f"rfsn_sb_{suffix}")
     os.makedirs(root, exist_ok=True)
     repo_dir = os.path.join(root, "repo")
     return Sandbox(root=root, repo_dir=repo_dir)
@@ -148,9 +152,16 @@ def reset_hard(sb: Sandbox) -> Dict[str, Any]:
 
 
 # Cache for expensive operations
-_tree_cache: Dict[str, Tuple[float, List[str]]] = {}
-_file_cache: Dict[str, Tuple[float, str]] = {}
-_cache_ttl = 300  # 5 minutes
+_tree_cache: Dict[str, Tuple[int, List[str]]] = {}
+_file_cache: Dict[str, Tuple[int, str]] = {}
+_cache_ttl_steps = 60
+_cache_epoch = 0
+
+
+def _tick_cache_epoch() -> int:
+    global _cache_epoch
+    _cache_epoch += 1
+    return int(_cache_epoch)
 
 
 def list_tree(sb: Sandbox, max_files: int = 400, use_cache: bool = True) -> Dict[str, Any]:
@@ -164,13 +175,13 @@ def list_tree(sb: Sandbox, max_files: int = 400, use_cache: bool = True) -> Dict
     Returns:
         Dictionary with ok status and files list.
     """
-    import time
     cache_key = f"{sb.repo_dir}:{max_files}"
+    now_step = _tick_cache_epoch()
     
     # Check cache
     if use_cache and cache_key in _tree_cache:
-        timestamp, files = _tree_cache[cache_key]
-        if time.time() - timestamp < _cache_ttl:
+        cached_step, files = _tree_cache[cache_key]
+        if (now_step - int(cached_step)) < int(_cache_ttl_steps):
             return {"ok": True, "files": files[:max_files]}
     
     files: List[str] = []
@@ -187,10 +198,10 @@ def list_tree(sb: Sandbox, max_files: int = 400, use_cache: bool = True) -> Dict
             files.append(rel.lstrip("./"))
             if len(files) >= max_files:
                 files.sort()
-                _tree_cache[cache_key] = (time.time(), files)
+                _tree_cache[cache_key] = (now_step, files)
                 return {"ok": True, "files": files}
     files.sort()
-    _tree_cache[cache_key] = (time.time(), files)
+    _tree_cache[cache_key] = (now_step, files)
     return {"ok": True, "files": files}
 
 
@@ -206,15 +217,15 @@ def read_file(sb: Sandbox, path: str, max_bytes: int = 120_000, use_cache: bool 
     Returns:
         Dictionary with ok status, content, and path.
     """
-    import time
     path = path.lstrip("./").replace("\\", "/")
     full_path = os.path.join(sb.repo_dir, path)
     cache_key = f"{full_path}:{max_bytes}"
+    now_step = _tick_cache_epoch()
     
     # Check cache
     if use_cache and cache_key in _file_cache:
-        timestamp, content = _file_cache[cache_key]
-        if time.time() - timestamp < _cache_ttl:
+        cached_step, content = _file_cache[cache_key]
+        if (now_step - int(cached_step)) < int(_cache_ttl_steps):
             return {"ok": True, "content": content, "path": path}
     
     if not os.path.exists(full_path):
@@ -222,7 +233,7 @@ def read_file(sb: Sandbox, path: str, max_bytes: int = 120_000, use_cache: bool 
     try:
         with open(full_path, "r", encoding="utf-8", errors="ignore") as f:
             content = f.read(max_bytes)
-        _file_cache[cache_key] = (time.time(), content)
+        _file_cache[cache_key] = (now_step, content)
         return {"ok": True, "content": content, "path": path}
     except Exception as e:
         return {"ok": False, "error": str(e)}
@@ -437,7 +448,8 @@ def apply_patch(sb: Sandbox, diff: str) -> Dict[str, Any]:
 
 def make_worktree(sb: Sandbox) -> str:
     """Create a detached worktree for testing candidate patches."""
-    wt = os.path.join(sb.root, f"wt_{uuid.uuid4().hex[:10]}")
+    suffix = uuid.uuid4().hex[:10]
+    wt = os.path.join(sb.root, f"wt_{suffix}")
     # Escape path for shell safety
     wt_escaped = shlex.quote(wt)
     code, out, err = _run(
@@ -680,6 +692,14 @@ def docker_test(
     # Enable network for npx commands (need to download packages)
     network_enabled = cmd.startswith("npx ")
     return docker_run(
-        sb, cmd, timeout_sec=timeout_sec, network=network_enabled, docker_image=docker_image,
-        cpu=cpu, mem_mb=mem_mb, pids=pids, read_only=read_only, use_cache=True
+        sb,
+        cmd,
+        timeout_sec=timeout_sec,
+        network=network_enabled,
+        docker_image=docker_image,
+        cpu=cpu,
+        mem_mb=mem_mb,
+        pids=pids,
+        read_only=read_only,
+        use_cache=True,
     )

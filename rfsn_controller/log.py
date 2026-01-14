@@ -3,7 +3,9 @@
 import json
 import os
 import time
-from typing import Any, Dict
+from typing import Any, Dict, Optional
+
+from .clock import Clock
 
 
 def ensure_dir(path: str) -> None:
@@ -11,7 +13,13 @@ def ensure_dir(path: str) -> None:
     os.makedirs(path, exist_ok=True)
 
 
-def write_jsonl(log_dir: str, record: Dict[str, Any]) -> None:
+def write_jsonl(
+    log_dir: str,
+    record: Dict[str, Any],
+    *,
+    clock: Optional[Clock] = None,
+    ts: Optional[float] = None,
+) -> None:
     """Append a record to a JSONL file in the given log directory.
 
     Args:
@@ -20,7 +28,12 @@ def write_jsonl(log_dir: str, record: Dict[str, Any]) -> None:
     """
     ensure_dir(log_dir)
     entry = dict(record)
-    entry["ts"] = time.time()
+    if ts is not None:
+        entry["ts"] = float(ts)
+    elif clock is not None:
+        entry["ts"] = float(clock.time())
+    else:
+        entry["ts"] = time.time()
     path = os.path.join(log_dir, "run.jsonl")
     with open(path, "a", encoding="utf-8") as f:
         f.write(json.dumps(entry, ensure_ascii=False) + "\n")

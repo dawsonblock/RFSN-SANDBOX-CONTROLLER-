@@ -11,7 +11,10 @@ main repository only if they pass focused and full verification.
 from __future__ import annotations
 
 import hashlib
+import os
+import random
 from dataclasses import dataclass, field
+from datetime import timezone
 from typing import Dict, Any, List, Optional, Tuple
 
 from .sandbox import (
@@ -53,6 +56,15 @@ from .phases import Phase, PhaseTransition
 from .project_detection import detect_project_type, get_setup_commands, get_default_test_command
 from .stall_detector import StallState
 from .evidence_pack import EvidencePackExporter, EvidencePackConfig
+from .action_outcome_memory import (
+    ActionOutcomeStore,
+    format_action_priors,
+    make_action_json_for_patch,
+    make_action_key_for_patch,
+    make_action_key_for_tool,
+    make_context_signature,
+    score_action,
+)
 from .apt_whitelist import AptWhitelist, AptTier
 from .sysdeps_installer import SysdepsInstaller
 from .setup_report import create_setup_report
@@ -62,6 +74,7 @@ from .buildpacks import (
     BuildpackContext,
     BuildpackType,
 )
+from .clock import FrozenClock, SystemClock, make_run_id, parse_utc_iso
 
 
 def get_model_client(model_name: str):
@@ -332,6 +345,14 @@ class ControllerConfig:
     sysdeps_tier: int = 4
     sysdeps_max_packages: int = 10
     build_cmd: Optional[str] = None
+    learning_db_path: Optional[str] = None
+    learning_half_life_days: int = 14
+    learning_max_age_days: int = 90
+    learning_max_rows: int = 20000
+    time_mode: str = "frozen"  # frozen|live
+    run_started_at_utc: Optional[str] = None
+    time_seed: Optional[int] = None
+    rng_seed: Optional[int] = None
 
 
 def run_controller(cfg: ControllerConfig) -> Dict[str, Any]:
@@ -344,14 +365,57 @@ def run_controller(cfg: ControllerConfig) -> Dict[str, Any]:
         A dictionary indicating success, or error details, and where the
         sandbox directory can be inspected.
     """
-    sb = create_sandbox()
+    start_dt = None
+    if cfg.run_started_at_utc:
+        start_dt = parse_utc_iso(cfg.run_started_at_utc)
+    if start_dt is None:
+        start_dt = SystemClock().now_utc()
+
+    if (cfg.time_mode or "").lower() == "live":
+        clock = SystemClock()
+    else:
+        clock = FrozenClock(start_dt)
+
+    seed_material = {
+        "repo": cfg.github_url,
+        "ref": cfg.ref,
+        "test_cmd": cfg.test_cmd,
+        "model": cfg.model,
+        "run_started_at_utc": start_dt.astimezone(timezone.utc).isoformat(),
+        "time_mode": (cfg.time_mode or "").lower() or "frozen",
+    }
+    if cfg.time_seed is None:
+        cfg.time_seed = int(hashlib.sha256(str(seed_material).encode("utf-8")).hexdigest()[:8], 16)
+    if cfg.rng_seed is None:
+        cfg.rng_seed = int(hashlib.sha256(f"rng:{cfg.time_seed}".encode("utf-8")).hexdigest()[:8], 16)
+
+    seed_material["time_seed"] = int(cfg.time_seed)
+    seed_material["rng_seed"] = int(cfg.rng_seed)
+    run_id = make_run_id(clock=clock, seed_material=seed_material)
+
+    random.seed(int(cfg.rng_seed))
+    try:
+        import numpy as np  # type: ignore
+
+        np.random.seed(int(cfg.rng_seed))
+    except Exception:
+        pass
+
+    sb = create_sandbox(run_id=run_id)
     log_dir = sb.root  # write logs next to sandbox for inspection
+
+    def log(rec: Dict[str, Any]) -> None:
+        write_jsonl(log_dir, rec, clock=clock)
+
+    memory_store: Optional[ActionOutcomeStore] = None
     bad_hashes: set[str] = set()
     observations: str = ""  # buffer for tool results to feed back to model
     patch_attempts: int = 0  # count patch attempts to detect lack of progress
     steps_without_progress: int = 0  # track steps without reducing failing tests
     min_failing_tests: int = 999999  # track minimum failing tests seen
     distinct_sigs: set[str] = set()  # track distinct error signatures for multi-bug detection
+    bailout_reason: Optional[str] = None
+    low_conf_streak: int = 0
 
     # Initialize vNext components
     current_phase = Phase.INGEST
@@ -366,10 +430,36 @@ def run_controller(cfg: ControllerConfig) -> Dict[str, Any]:
     winner_diff = None
 
     try:
-        write_jsonl(log_dir, {"phase": "init", "cfg": cfg.__dict__})
+        log({
+            "phase": "run_header",
+            "run_id": run_id,
+            "run_started_at_utc": start_dt.astimezone(timezone.utc).isoformat(),
+            "time_seed": int(cfg.time_seed or 0),
+            "time_mode": (cfg.time_mode or "").lower() or "frozen",
+            "rng_seed": int(cfg.rng_seed or 0),
+        })
+        log({"phase": "init", "cfg": cfg.__dict__})
+
+        if cfg.learning_db_path:
+            db_path = os.path.expanduser(cfg.learning_db_path)
+            if not os.path.isabs(db_path):
+                db_path = os.path.abspath(db_path)
+            memory_store = ActionOutcomeStore(
+                db_path,
+                half_life_days=cfg.learning_half_life_days,
+                max_age_days=cfg.learning_max_age_days,
+                max_rows=cfg.learning_max_rows,
+            )
+            log({
+                "phase": "learning_init",
+                "db_path": db_path,
+                "half_life_days": cfg.learning_half_life_days,
+                "max_age_days": cfg.learning_max_age_days,
+                "max_rows": cfg.learning_max_rows,
+            })
 
         # === PHASE: INGEST ===
-        write_jsonl(log_dir, PhaseTransition(None, Phase.INGEST).to_dict())
+        log(PhaseTransition(None, Phase.INGEST).to_dict())
 
         # Validate GitHub URL
         is_valid, normalized_url, url_error = validate_github_url(cfg.github_url)
@@ -377,18 +467,18 @@ def run_controller(cfg: ControllerConfig) -> Dict[str, Any]:
             return {"ok": False, "error": f"Invalid GitHub URL: {url_error}"}
 
         github_url = normalized_url
-        write_jsonl(log_dir, {"phase": "url_validation", "normalized_url": github_url})
+        log({"phase": "url_validation", "normalized_url": github_url})
 
         # Clone repository
         r = clone_public_github(sb, github_url)
-        write_jsonl(log_dir, {"phase": "clone", "result": r})
+        log({"phase": "clone", "result": r})
         if not r.get("ok"):
             return {"ok": False, "error": r.get("error") or r.get("stderr")}
 
         # Checkout ref if specified
         if cfg.ref:
             co = checkout(sb, cfg.ref)
-            write_jsonl(log_dir, {"phase": "checkout", "result": co})
+            log({"phase": "checkout", "result": co})
             if not co.get("ok"):
                 return {"ok": False, "error": co.get("stderr")}
 
@@ -399,7 +489,7 @@ def run_controller(cfg: ControllerConfig) -> Dict[str, Any]:
 
         # === PHASE: DETECT ===
         current_phase = Phase.DETECT
-        write_jsonl(log_dir, PhaseTransition(Phase.INGEST, Phase.DETECT).to_dict())
+        log(PhaseTransition(Phase.INGEST, Phase.DETECT).to_dict())
 
         # === PHASE: V3 BUILDPACK DETECTION ===
         selected_buildpack = None
@@ -455,18 +545,18 @@ def run_controller(cfg: ControllerConfig) -> Dict[str, Any]:
                 selected_buildpack_instance = best_buildpack
                 selected_buildpack = best_buildpack.image()
 
-                write_jsonl(log_dir, {
+                log({
                     "phase": "buildpack_detect",
                     "buildpack_type": best_result.buildpack_type.value,
                     "confidence": best_result.confidence,
-                    "workspace": best_result.workspace,
+                    "reason": best_result.reason,
                     "image": selected_buildpack,
                     "metadata": best_result.metadata,
                 })
             else:
                 # Fallback to docker_image
                 selected_buildpack = cfg.docker_image
-                write_jsonl(log_dir, {
+                log({
                     "phase": "buildpack_detect",
                     "error": "No buildpack detected",
                     "fallback_image": selected_buildpack,
@@ -478,7 +568,7 @@ def run_controller(cfg: ControllerConfig) -> Dict[str, Any]:
                     forced = get_buildpack(inferred)
                     selected_buildpack_instance = forced
                     selected_buildpack = forced.image()
-                    write_jsonl(log_dir, {
+                    log({
                         "phase": "buildpack_override",
                         "reason": "test_cmd",
                         "buildpack_type": inferred.value,
@@ -487,7 +577,7 @@ def run_controller(cfg: ControllerConfig) -> Dict[str, Any]:
         except Exception as e:
             # Fallback to docker_image if buildpack detection fails
             selected_buildpack = cfg.docker_image
-            write_jsonl(log_dir, {"phase": "buildpack_detect", "error": str(e)})
+            log({"phase": "buildpack_detect", "error": str(e)})
 
         # Legacy detection for backward compatibility
         project_type = detect_project_type(sb.repo_dir)
@@ -497,12 +587,12 @@ def run_controller(cfg: ControllerConfig) -> Dict[str, Any]:
         # Use detected test command if not overridden
         effective_test_cmd = cfg.test_cmd if cfg.test_cmd != "pytest -q" else (detected_test_cmd or "pytest -q")
 
-        write_jsonl(log_dir, {
+        log({
             "phase": "detect",
             "project_type": project_type.name if project_type else None,
             "setup_commands": setup_commands,
-            "detected_test_cmd": detected_test_cmd,
-            "effective_test_cmd": effective_test_cmd,
+            "test_cmd": effective_test_cmd,
+            "buildpack_image": selected_buildpack,
         })
 
         # Detect QuixBugs repository structure
@@ -510,7 +600,7 @@ def run_controller(cfg: ControllerConfig) -> Dict[str, Any]:
 
         # === PHASE: SETUP ===
         current_phase = Phase.SETUP
-        write_jsonl(log_dir, PhaseTransition(Phase.DETECT, Phase.SETUP).to_dict())
+        log(PhaseTransition(Phase.DETECT, Phase.SETUP).to_dict())
 
         # Track setup results for validation
         setup_results = {}
@@ -551,10 +641,12 @@ def run_controller(cfg: ControllerConfig) -> Dict[str, Any]:
                     "stdout": result.stdout[:1000],
                     "stderr": result.stderr[:1000],
                 })
-                write_jsonl(log_dir, {
+                log({
                     "phase": "setup",
                     "command": cmd_str,
                     "result": {"ok": result.ok, "exit_code": result.exit_code},
+                    "stdout": result.stdout[:1000],
+                    "stderr": result.stderr[:1000],
                 })
                 if not result.ok:
                     print(f"[SETUP] Failed: {result.stderr[:200]}")
@@ -588,10 +680,12 @@ def run_controller(cfg: ControllerConfig) -> Dict[str, Any]:
                         "stdout": result.stdout[:1000],
                         "stderr": result.stderr[:1000],
                     })
-                    write_jsonl(log_dir, {
+                    log({
                         "phase": "setup",
                         "command": setup_cmd,
                         "result": {"ok": result.ok, "exit_code": result.exit_code},
+                        "stdout": result.stdout[:1000],
+                        "stderr": result.stderr[:1000],
                     })
                     if not result.ok:
                         print(f"[SETUP] Failed: {result.stderr[:200]}")
@@ -608,7 +702,7 @@ def run_controller(cfg: ControllerConfig) -> Dict[str, Any]:
 
         if cfg.enable_sysdeps and selected_buildpack_instance:
             current_phase = Phase.SETUP
-            write_jsonl(log_dir, {"phase": "sysdeps", "enabled": True})
+            log({"phase": "sysdeps", "enabled": True})
 
             # Use buildpack's sysdeps whitelist
             sysdeps_whitelist = selected_buildpack_instance.sysdeps_whitelist()
@@ -645,13 +739,13 @@ def run_controller(cfg: ControllerConfig) -> Dict[str, Any]:
             sysdeps_installed = sysdeps_result.installed_packages
             sysdeps_blocked = sysdeps_result.blocked_packages
 
-            write_jsonl(log_dir, {
+            log({
                 "phase": "sysdeps",
                 "result": {
                     "success": sysdeps_result.success,
-                    "installed": sysdeps_installed,
-                    "blocked": sysdeps_blocked,
-                    "error": sysdeps_result.error_message,
+                    "installed_packages": sysdeps_installed,
+                    "blocked_packages": sysdeps_blocked,
+                    "attempted": sysdeps_result.attempted_packages,
                 },
             })
 
@@ -677,7 +771,7 @@ def run_controller(cfg: ControllerConfig) -> Dict[str, Any]:
             sysdeps_blocked=sysdeps_blocked,
         )
 
-        write_jsonl(log_dir, {
+        log({
             "phase": "setup_validation",
             "report": setup_report.to_dict(),
         })
@@ -686,7 +780,7 @@ def run_controller(cfg: ControllerConfig) -> Dict[str, Any]:
         if setup_report.should_bailout():
             bailout_reason = setup_report.get_bailout_message()
             print(f"\n[BAILOUT] {bailout_reason}")
-            write_jsonl(log_dir, {
+            log({
                 "phase": "bailout",
                 "reason": bailout_reason,
                 "setup_report": setup_report.to_dict(),
@@ -708,7 +802,7 @@ def run_controller(cfg: ControllerConfig) -> Dict[str, Any]:
 
         # === PHASE: BASELINE ===
         current_phase = Phase.BASELINE
-        write_jsonl(log_dir, PhaseTransition(Phase.SETUP, Phase.BASELINE).to_dict())
+        log(PhaseTransition(Phase.SETUP, Phase.BASELINE).to_dict())
 
         # Use user-provided test command if available, otherwise use buildpack test plan
         if cfg.test_cmd and cfg.test_cmd != "pytest -q":
@@ -727,11 +821,11 @@ def run_controller(cfg: ControllerConfig) -> Dict[str, Any]:
         v = _run_tests_in_sandbox(sb, effective_test_cmd, cfg, command_log, selected_buildpack, selected_buildpack_instance)
         baseline_output = (v.stdout or "") + "\n" + (v.stderr or "")
 
-        write_jsonl(log_dir, {
+        log({
             "phase": "baseline",
             "tests_ok": v.ok,
             "exit_code": v.exit_code,
-            "failing_tests": v.failing_tests,
+            "failing_tests": v.failing_tests[:10],
             "sig": v.sig,
         })
 
@@ -761,14 +855,14 @@ def run_controller(cfg: ControllerConfig) -> Dict[str, Any]:
                     v = _run_tests_in_sandbox(sb, suggested_cmd, cfg, command_log, selected_buildpack, selected_buildpack_instance)
                     baseline_output = (v.stdout or "") + "\n" + (v.stderr or "")
 
-                    write_jsonl(log_dir, {
+                    log({
                         "phase": "baseline_retry",
                         "tests_ok": v.ok,
                         "exit_code": v.exit_code,
-                        "failing_tests": v.failing_tests,
+                        "failing_tests": v.failing_tests[:10],
                         "sig": v.sig,
+                        "test_cmd": suggested_cmd,
                     })
-
                     if v.ok or v.exit_code != 2:
                         effective_test_cmd = suggested_cmd
                         print(f"  Using new test command: {effective_test_cmd}")
@@ -785,7 +879,7 @@ def run_controller(cfg: ControllerConfig) -> Dict[str, Any]:
 
         # === PHASE: REPAIR_LOOP ===
         current_phase = Phase.REPAIR_LOOP
-        write_jsonl(log_dir, PhaseTransition(Phase.BASELINE, Phase.REPAIR_LOOP).to_dict())
+        log(PhaseTransition(Phase.BASELINE, Phase.REPAIR_LOOP).to_dict())
 
         # If fix_all mode, use unlimited steps
         max_iterations = float('inf') if cfg.fix_all else cfg.max_steps
@@ -798,18 +892,17 @@ def run_controller(cfg: ControllerConfig) -> Dict[str, Any]:
             final_output = (v.stdout or "") + "\n" + (v.stderr or "")
 
             print(f"[Step {step}] Tests: {'PASS' if v.ok else 'FAIL'} | Failing: {len(v.failing_tests)} tests")
-            write_jsonl(log_dir, {
+            top_test_id = v.failing_tests[0] if v.failing_tests else None
+            is_stalled = stall_state.update(len(v.failing_tests), top_test_id, v.sig)
+            log({
                 "phase": "measure",
                 "step": step,
                 "tests_ok": v.ok,
                 "exit_code": v.exit_code,
-                "failing_tests": v.failing_tests,
+                "failing_tests": v.failing_tests[:10],
                 "sig": v.sig,
+                "stalled": bool(is_stalled),
             })
-
-            # Update stall detector
-            top_test_id = v.failing_tests[0] if v.failing_tests else None
-            is_stalled = stall_state.update(len(v.failing_tests), top_test_id, v.sig)
 
             if v.ok:
                 print(f"\n✅ SUCCESS! All tests passing after {step} steps.")
@@ -824,9 +917,33 @@ def run_controller(cfg: ControllerConfig) -> Dict[str, Any]:
             else:
                 steps_without_progress += 1
 
+            if stall_state.iterations_without_improvement >= (stall_state.stall_threshold * 3):
+                bailout_reason = (
+                    f"Prolonged stall: {stall_state.iterations_without_improvement} iterations "
+                    f"without improvement"
+                )
+                print(f"\n❌ Early termination: {bailout_reason}")
+                log({
+                    "phase": "bailout",
+                    "step": step,
+                    "reason": bailout_reason,
+                    "sig": v.sig,
+                    "top_test_id": top_test_id,
+                })
+                current_phase = Phase.BAILOUT
+                break
+
             # Early termination: no progress after N steps
             if steps_without_progress >= cfg.max_steps_without_progress:
                 print(f"\n❌ Early termination: No progress for {steps_without_progress} steps")
+                bailout_reason = f"No progress for {steps_without_progress} steps"
+                log({
+                    "phase": "bailout",
+                    "step": step,
+                    "reason": bailout_reason,
+                    "sig": v.sig,
+                    "top_test_id": top_test_id,
+                })
                 current_phase = Phase.BAILOUT
                 break
 
@@ -837,7 +954,12 @@ def run_controller(cfg: ControllerConfig) -> Dict[str, Any]:
 
             # If stalled, force evidence gathering
             if is_stalled:
-                write_jsonl(log_dir, {"phase": "stall_detected", "step": step, "sig": v.sig, "iterations_without_improvement": stall_state.iterations_without_improvement})
+                log({
+                    "phase": "stall_detected",
+                    "step": step,
+                    "sig": v.sig,
+                    "iterations_without_improvement": stall_state.iterations_without_improvement,
+                })
                 print(f"[Step {step}] ⚠️  Stall detected - switching to evidence gathering")
 
             # controller policy
@@ -845,6 +967,37 @@ def run_controller(cfg: ControllerConfig) -> Dict[str, Any]:
             if is_stalled:
                 pd.intent = "gather_evidence"
                 pd.subgoal = "Collect more context: list_tree, grep for error symbols, read new files"
+
+            if pd.confidence < 0.55 and steps_without_progress > 0:
+                low_conf_streak += 1
+            else:
+                low_conf_streak = 0
+
+            if low_conf_streak >= 4:
+                bailout_reason = f"Confidence collapse: {low_conf_streak} low-confidence steps"
+                print(f"\n❌ Early termination: {bailout_reason}")
+                log({
+                    "phase": "bailout",
+                    "step": step,
+                    "reason": bailout_reason,
+                    "sig": v.sig,
+                    "top_test_id": top_test_id,
+                    "policy_confidence": pd.confidence,
+                })
+                current_phase = Phase.BAILOUT
+                break
+
+            if tool_manager.total_requests_this_run >= cfg.max_tool_calls and pd.intent == "gather_evidence":
+                bailout_reason = "Tool quota exhausted during evidence gathering"
+                print(f"\n❌ Early termination: {bailout_reason}")
+                log({
+                    "phase": "bailout",
+                    "step": step,
+                    "reason": bailout_reason,
+                    "tool_stats": tool_manager.get_stats(),
+                })
+                current_phase = Phase.BAILOUT
+                break
 
             print(f"[Step {step}] Intent: {pd.intent} | Subgoal: {pd.subgoal[:60]}...")
 
@@ -854,6 +1007,47 @@ def run_controller(cfg: ControllerConfig) -> Dict[str, Any]:
             else:
                 files = _collect_relevant_files(sb, v, repo_tree_text)
             files_block = _files_block(files)
+
+            failing_test_file = normalize_test_path(v.failing_tests[0]) if v.failing_tests else None
+            ctx = make_context_signature(
+                failure_class=pd.intent,
+                repo_type=project_type.name if project_type else str(cfg.project_type),
+                language=selected_buildpack.value if selected_buildpack else "unknown",
+                env={
+                    "docker_image": cfg.docker_image,
+                    "unsafe_host_exec": bool(cfg.unsafe_host_exec),
+                    "focus_timeout": int(cfg.focus_timeout),
+                    "full_timeout": int(cfg.full_timeout),
+                    "enable_sysdeps": bool(cfg.enable_sysdeps),
+                },
+                attempt_count=patch_attempts,
+                failing_test_file=failing_test_file,
+                sig=v.sig,
+                stalled=bool(is_stalled),
+            )
+            action_priors_text = ""
+            if memory_store is not None:
+                priors = memory_store.query_action_priors(
+                    ctx,
+                    now_ts=int(clock.monotonic_steps()),
+                )
+                action_priors_text = format_action_priors(priors)
+                log({
+                    "phase": "learning_priors",
+                    "step": step,
+                    "context": ctx.as_dict(),
+                    "priors": [
+                        {
+                            "action_type": p.action_type,
+                            "action_key": p.action_key,
+                            "weight": p.weight,
+                            "success_rate": p.success_rate,
+                            "mean_score": p.mean_score,
+                            "n": p.n,
+                        }
+                        for p in priors
+                    ],
+                })
 
             # model state = facts
             state = {
@@ -866,6 +1060,7 @@ def run_controller(cfg: ControllerConfig) -> Dict[str, Any]:
                 "repo_tree": repo_tree_text,
                 "constraints": _constraints_text(),
                 "files_block": files_block,
+                "action_priors": action_priors_text,
                 "observations": observations,
             }
             model_input = build_model_input(state)
@@ -876,7 +1071,7 @@ def run_controller(cfg: ControllerConfig) -> Dict[str, Any]:
             call_model = get_model_client(cfg.model)
             for t in cfg.temps:
                 resp = call_model(model_input, temperature=t)
-                write_jsonl(log_dir, {"phase": "model", "step": step, "temp": t, "resp": resp})
+                log({"phase": "model", "step": step, "temp": t, "resp": resp})
 
                 mode = resp.get("mode")
                 if mode == "tool_request":
@@ -891,8 +1086,35 @@ def run_controller(cfg: ControllerConfig) -> Dict[str, Any]:
                     for req in allowed_requests:
                         tool = req.get("tool", "")
                         args = req.get("args", {}) if isinstance(req.get("args"), dict) else {}
+                        t0 = clock.perf_counter()
                         tr = _execute_tool(sb, tool, args)
+                        clock.tick(1)
+                        t1 = clock.perf_counter()
                         tool_results.append({"tool": tool, "args": args, "result": tr})
+
+                        if memory_store is not None:
+                            outcome = "success" if tr.get("ok") else "fail"
+                            score = score_action(
+                                outcome=outcome,
+                                exec_time_ms=int((t1 - t0) * 1000.0),
+                                command_count=1,
+                                diff_lines=0,
+                                regressions=0,
+                            )
+                            memory_store.record(
+                                source_run_id=f"step{step}:temp{t}:tool{len(tool_results)-1}",
+                                context=ctx,
+                                action_type="tool_request",
+                                action_key=make_action_key_for_tool(tool, args),
+                                action_json={"tool": tool, "args": args},
+                                outcome=outcome,
+                                score=score,
+                                confidence_weight=1.0,
+                                exec_time_ms=int((t1 - t0) * 1000.0),
+                                command_count=1,
+                                diff_lines=0,
+                                regressions=0,
+                            )
 
                         # Summarize for observations
                         summary = f"Tool: {tool}\n"
@@ -915,13 +1137,31 @@ def run_controller(cfg: ControllerConfig) -> Dict[str, Any]:
                             summary += f"Listed {len(files)} files\n"
                         obs_additions.append(summary)
 
-                    write_jsonl(log_dir, {
+                    log({
                         "phase": "tool_execution",
                         "step": step,
                         "temp": t,
                         "results": tool_results,
                         "blocked": blocked_reasons,
                     })
+
+                    if (
+                        not allowed_requests
+                        and any(
+                            "Total tool request quota exceeded" in (br or "")
+                            for br in blocked_reasons
+                        )
+                    ):
+                        bailout_reason = "Tool quota exhausted"
+                        print(f"\n❌ Early termination: {bailout_reason}")
+                        log({
+                            "phase": "bailout",
+                            "step": step,
+                            "reason": bailout_reason,
+                            "tool_stats": tool_manager.get_stats(),
+                        })
+                        current_phase = Phase.BAILOUT
+                        break
 
                     # Append to observations buffer
                     if obs_additions:
@@ -941,6 +1181,9 @@ def run_controller(cfg: ControllerConfig) -> Dict[str, Any]:
                         bad_hashes.add(dh)
                         patches_to_evaluate.append((diff, t))
 
+            if current_phase == Phase.BAILOUT:
+                break
+
             # Evaluate patches
             if patches_to_evaluate:
                 patch_attempts += 1
@@ -954,7 +1197,23 @@ def run_controller(cfg: ControllerConfig) -> Dict[str, Any]:
                         valid_patches.append((diff, temp))
                     else:
                         print(f"[Step {step}] Patch rejected by hygiene gates: {hygiene_result.violations}")
-                        write_jsonl(log_dir, {
+                        if memory_store is not None:
+                            action_json = make_action_json_for_patch(diff)
+                            memory_store.record(
+                                source_run_id=f"step{step}:temp{temp}:patch_hygiene_reject",
+                                context=ctx,
+                                action_type="patch",
+                                action_key=make_action_key_for_patch(diff),
+                                action_json=action_json,
+                                outcome="blocked",
+                                score=0.0,
+                                confidence_weight=1.0 / (1.0 + float(temp)),
+                                exec_time_ms=0,
+                                command_count=0,
+                                diff_lines=int(action_json.get("diff_lines", 0)),
+                                regressions=0,
+                            )
+                        log({
                             "phase": "patch_rejected",
                             "step": step,
                             "reasons": hygiene_result.violations,
@@ -969,17 +1228,40 @@ def run_controller(cfg: ControllerConfig) -> Dict[str, Any]:
                         effective_test_cmd,
                     )
 
+                    if memory_store is not None:
+                        for r in results:
+                            action_json = make_action_json_for_patch(r.diff)
+                            outcome = "success" if r.ok else "fail"
+                            score = score_action(
+                                outcome=outcome,
+                                exec_time_ms=0,
+                                command_count=2,
+                                diff_lines=int(action_json.get("diff_lines", 0)),
+                                regressions=0,
+                            )
+                            memory_store.record(
+                                source_run_id=f"step{step}:temp{r.temperature}:patch_eval:{r.diff_hash}",
+                                context=ctx,
+                                action_type="patch",
+                                action_key=r.diff_hash,
+                                action_json=action_json,
+                                outcome=outcome,
+                                score=score,
+                                confidence_weight=1.0 / (1.0 + float(r.temperature)),
+                                exec_time_ms=0,
+                                command_count=2,
+                                diff_lines=int(action_json.get("diff_lines", 0)),
+                                regressions=0,
+                            )
+
                     winner = find_first_successful_patch(results)
                     if winner:
                         print(f"[Step {step}] ✅ Found winning patch!")
-                        write_jsonl(
-                            log_dir,
-                            {
-                                "phase": "winner_found",
-                                "step": step,
-                                "winner_hash": winner.diff_hash,
-                            },
-                        )
+                        log({
+                            "phase": "winner_found",
+                            "step": step,
+                            "winner_hash": winner.diff_hash,
+                        })
                         # Apply winner to main repo
                         apply_patch(sb, winner.diff)
                         winner_diff = winner.diff
@@ -987,16 +1269,13 @@ def run_controller(cfg: ControllerConfig) -> Dict[str, Any]:
                         break
                     else:
                         print(f"[Step {step}] No patch passed verification")
-                        write_jsonl(
-                            log_dir,
-                            {"phase": "no_winner", "step": step, "attempted": len(valid_patches)},
-                        )
+                        log({"phase": "no_winner", "step": step, "attempted": len(valid_patches)})
 
             step += 1
 
         # === PHASE: FINAL_VERIFY ===
         if current_phase == Phase.FINAL_VERIFY:
-            write_jsonl(log_dir, PhaseTransition(Phase.REPAIR_LOOP, Phase.FINAL_VERIFY).to_dict())
+            log(PhaseTransition(Phase.REPAIR_LOOP, Phase.FINAL_VERIFY).to_dict())
 
             print("\n[FINAL_VERIFY] Running full test suite...")
             v = _run_tests_in_sandbox(sb, effective_test_cmd, cfg, command_log, selected_buildpack, selected_buildpack_instance)
@@ -1010,7 +1289,7 @@ def run_controller(cfg: ControllerConfig) -> Dict[str, Any]:
 
         # === PHASE: EVIDENCE_PACK ===
         current_phase = Phase.EVIDENCE_PACK
-        write_jsonl(log_dir, PhaseTransition(Phase.FINAL_VERIFY, Phase.EVIDENCE_PACK).to_dict())
+        log(PhaseTransition(Phase.FINAL_VERIFY, Phase.EVIDENCE_PACK).to_dict())
 
         # Export evidence pack
         state_dict = {
@@ -1023,6 +1302,7 @@ def run_controller(cfg: ControllerConfig) -> Dict[str, Any]:
             "min_failing_tests": min_failing_tests,
             "final_failing_tests": len(v.failing_tests) if not v.ok else 0,
             "final_ok": v.ok,
+            "bailout_reason": bailout_reason,
         }
 
         pack_dir = evidence_exporter.export(
@@ -1033,6 +1313,7 @@ def run_controller(cfg: ControllerConfig) -> Dict[str, Any]:
             winner_diff=winner_diff,
             state=state_dict,
             command_log=command_log,
+            run_id=run_id,
         )
 
         print(f"\n[EVIDENCE_PACK] Exported to: {pack_dir}")
@@ -1053,6 +1334,10 @@ def run_controller(cfg: ControllerConfig) -> Dict[str, Any]:
             "sandbox": sb.root,
             "repo_dir": sb.repo_dir,
         }
+
+    finally:
+        if memory_store is not None:
+            memory_store.close()
 
 
 def _run_tests_in_sandbox(

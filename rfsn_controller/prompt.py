@@ -33,6 +33,11 @@ def build_model_input(state: Dict[str, Any]) -> str:
         f"CONSTRAINTS:\n{state['constraints']}\n\n",
         f"FILES:\n{state['files_block']}\n",
     ]
+
+    if state.get('action_priors'):
+        sections.append(
+            f"\nACTION_PRIORS:\n{_truncate(state['action_priors'], 12000)}\n"
+        )
     
     # Add observations if present
     if state.get('observations'):

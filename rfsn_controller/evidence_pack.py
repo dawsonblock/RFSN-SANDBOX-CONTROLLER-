@@ -49,6 +49,7 @@ class EvidencePackExporter:
         winner_diff: Optional[str],
         state: Dict[str, Any],
         command_log: Optional[List[Dict[str, Any]]] = None,
+        run_id: Optional[str] = None,
     ) -> str:
         """Export an evidence pack.
 
@@ -60,11 +61,13 @@ class EvidencePackExporter:
             winner_diff: Winning patch diff (if any).
             state: State dictionary with config and metadata.
             command_log: Optional command execution log.
+            run_id: Optional deterministic run id to use for output directory.
 
         Returns:
             Path to the evidence pack directory.
         """
-        run_id = self.create_run_id()
+        if run_id is None:
+            run_id = self.create_run_id()
         pack_dir = os.path.join(self.config.output_dir, run_id)
         os.makedirs(pack_dir, exist_ok=True)
 

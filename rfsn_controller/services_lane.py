@@ -5,6 +5,7 @@ PostgreSQL, Redis, MongoDB, etc. using Docker Compose for testing.
 """
 
 import os
+import importlib
 import subprocess
 import time
 from typing import List, Optional, Dict, Any
@@ -30,18 +31,22 @@ class ServiceConfig:
         Returns:
             Dictionary in Docker Compose service format.
         """
-        service = {
+        service: Dict[str, Any] = {
             "image": self.image,
         }
 
         if self.ports:
-            service["ports"] = [f"{host}:{container}" for host, container in self.ports.items()]
+            service["ports"] = [
+                f"{host}:{container}" for host, container in self.ports.items()
+            ]
 
         if self.environment:
             service["environment"] = self.environment
 
         if self.volumes:
-            service["volumes"] = [f"{host}:{container}" for host, container in self.volumes.items()]
+            service["volumes"] = [
+                f"{host}:{container}" for host, container in self.volumes.items()
+            ]
 
         if self.command:
             service["command"] = self.command
@@ -406,7 +411,7 @@ class DockerComposeManager:
         Returns:
             YAML content for docker-compose.yml.
         """
-        compose = {
+        compose: Dict[str, Any] = {
             "version": "3.8",
             "services": {},
         }
@@ -415,8 +420,7 @@ class DockerComposeManager:
             compose["services"][service.name] = service.to_compose()
 
         # Convert to YAML
-        import yaml
-
+        yaml = importlib.import_module("yaml")
         return yaml.dump(compose, default_flow_style=False, sort_keys=False)
 
     def write_compose_file(self) -> None:
@@ -596,9 +600,10 @@ class DockerComposeManager:
         Returns:
             Result dictionary with status.
         """
-        start_time = time.time()
+        poll_interval_sec = 2
+        max_attempts = max(1, int(timeout // poll_interval_sec))
 
-        while time.time() - start_time < timeout:
+        for _ in range(max_attempts):
             all_healthy = True
 
             for service in self.services:
@@ -630,7 +635,7 @@ class DockerComposeManager:
             if all_healthy:
                 return {"ok": True, "message": "All services healthy"}
 
-            time.sleep(2)
+            time.sleep(poll_interval_sec)
 
         return {
             "ok": False,
