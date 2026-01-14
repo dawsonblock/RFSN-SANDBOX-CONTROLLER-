@@ -53,14 +53,15 @@ from .phases import Phase, PhaseTransition
 from .project_detection import detect_project_type, get_setup_commands, get_default_test_command
 from .stall_detector import StallState
 from .evidence_pack import EvidencePackExporter, EvidencePackConfig
-from .model_validator import ModelOutputValidator
-from .winner_selection import score_patch
-from .project_detector import ProjectDetector, ProjectType
-from .language_templates import Language, get_buildpack_image
 from .apt_whitelist import AptWhitelist, AptTier
 from .sysdeps_installer import SysdepsInstaller
-from .setup_report import SetupReport, create_setup_report
-from .test_detector import TestDetector
+from .setup_report import create_setup_report
+from .buildpacks import (
+    get_all_buildpacks,
+    get_buildpack,
+    BuildpackContext,
+    BuildpackType,
+)
 
 
 def get_model_client(model_name: str):
@@ -69,10 +70,25 @@ def get_model_client(model_name: str):
         return call_deepseek
     else:
         return call_gemini
-from .buildpacks import (
-    get_all_buildpacks,
-    BuildpackContext,
-)
+
+
+def _infer_buildpack_type_from_test_cmd(test_cmd: str) -> Optional[BuildpackType]:
+    cmd = (test_cmd or "").strip().lower()
+    if not cmd:
+        return None
+    if cmd.startswith("pytest") or " pytest" in cmd or "python -m pytest" in cmd or "python3 -m pytest" in cmd:
+        return BuildpackType.PYTHON
+    if cmd.startswith(("npm ", "yarn ", "pnpm ", "npx ", "bun ")):
+        return BuildpackType.NODE
+    if cmd.startswith(("go test", "go test ")):
+        return BuildpackType.GO
+    if cmd.startswith(("cargo test", "cargo test ")):
+        return BuildpackType.RUST
+    if cmd.startswith(("mvn ", "./gradlew", "gradle ", "./mvnw")):
+        return BuildpackType.JAVA
+    if cmd.startswith(("dotnet test", "dotnet test ")):
+        return BuildpackType.DOTNET
+    return None
 
 
 FORBIDDEN_PREFIXES = [".git/", "node_modules/", ".venv/", "venv/", "__pycache__/"]
@@ -93,8 +109,9 @@ def _files_block(files: List[Dict[str, Any]]) -> str:
     """Create a files block for the model input from a list of read_file results."""
     blocks = []
     for f in files:
-        if f.get("ok") and f.get("path") and isinstance(f.get("text"), str):
-            blocks.append(f"[path: {f['path']}]\n{f['text']}\n")
+        content = f.get("content") if isinstance(f.get("content"), str) else f.get("text")
+        if f.get("ok") and f.get("path") and isinstance(content, str):
+            blocks.append(f"[path: {f['path']}]\n{content}\n")
     return "\n".join(blocks)
 
 
@@ -331,7 +348,6 @@ def run_controller(cfg: ControllerConfig) -> Dict[str, Any]:
     log_dir = sb.root  # write logs next to sandbox for inspection
     bad_hashes: set[str] = set()
     observations: str = ""  # buffer for tool results to feed back to model
-    sig_history: list[str] = []  # track error signatures for stall detection
     patch_attempts: int = 0  # count patch attempts to detect lack of progress
     steps_without_progress: int = 0  # track steps without reducing failing tests
     min_failing_tests: int = 999999  # track minimum failing tests seen
@@ -400,36 +416,28 @@ def run_controller(cfg: ControllerConfig) -> Dict[str, Any]:
             # Read relevant files for buildpack detection
             buildpack_files = [
                 "pyproject.toml", "requirements.txt", "setup.py", "setup.cfg",
-                "package.json", "package-lock.json", "yarn.lock", "pnpm-lock.yaml",
+                "Pipfile", "poetry.lock",
+                "conftest.py", "pytest.ini", "py.typed",  # Python indicators
+                "package.json", "package-lock.json", "yarn.lock", "pnpm-lock.yaml", "bun.lockb",
                 "go.mod", "go.sum",
                 "Cargo.toml", "Cargo.lock",
                 "pom.xml", "build.gradle", "build.gradle.kts", "gradlew",
-                "*.sln", "*.csproj", "global.json",
+                "global.json",
             ]
 
             for filename in buildpack_files:
-                if "*" in filename:
-                    # Handle wildcards
-                    try:
-                        result = grep(sb, filename)
-                        if result and result.stdout:
-                            files = result.stdout.strip().split("\n")
-                            for f in files:
-                                try:
-                                    content = read_file(sb, f)
-                                    if content:
-                                        buildpack_ctx.files[f] = content
-                                except Exception:
-                                    pass
-                    except Exception:
-                        pass
-                else:
-                    try:
-                        content = read_file(sb, filename)
-                        if content:
-                            buildpack_ctx.files[filename] = content
-                    except Exception:
-                        pass
+                match_path = next(
+                    (f for f in repo_tree if f == filename or f.endswith("/" + filename)),
+                    None,
+                )
+                if not match_path:
+                    continue
+                try:
+                    rf = read_file(sb, match_path)
+                    if isinstance(rf, dict) and rf.get("ok") and rf.get("content"):
+                        buildpack_ctx.files[filename] = rf["content"]
+                except Exception:
+                    pass
 
             # Detect buildpack
             all_buildpacks = get_all_buildpacks()
@@ -463,6 +471,19 @@ def run_controller(cfg: ControllerConfig) -> Dict[str, Any]:
                     "error": "No buildpack detected",
                     "fallback_image": selected_buildpack,
                 })
+
+            if cfg.test_cmd and cfg.test_cmd != "pytest -q":
+                inferred = _infer_buildpack_type_from_test_cmd(cfg.test_cmd)
+                if inferred is not None:
+                    forced = get_buildpack(inferred)
+                    selected_buildpack_instance = forced
+                    selected_buildpack = forced.image()
+                    write_jsonl(log_dir, {
+                        "phase": "buildpack_override",
+                        "reason": "test_cmd",
+                        "buildpack_type": inferred.value,
+                        "image": selected_buildpack,
+                    })
         except Exception as e:
             # Fallback to docker_image if buildpack detection fails
             selected_buildpack = cfg.docker_image
@@ -500,6 +521,16 @@ def run_controller(cfg: ControllerConfig) -> Dict[str, Any]:
             print(f"[SETUP] Using buildpack: {selected_buildpack_instance.buildpack_type.value}")
             install_steps = selected_buildpack_instance.install_plan(buildpack_ctx)
 
+            setup_key_map = {
+                "python": "pip",
+                "node": "node",
+                "go": "go",
+                "rust": "rust",
+                "java": "java",
+                "dotnet": "dotnet",
+            }
+            setup_key = setup_key_map.get(selected_buildpack_instance.buildpack_type.value)
+
             for step in install_steps:
                 print(f"[SETUP] Running: {step.description}")
                 cmd_str = " ".join(step.argv)
@@ -507,6 +538,10 @@ def run_controller(cfg: ControllerConfig) -> Dict[str, Any]:
 
                 # Store result by step description
                 setup_results[step.description] = result
+                if setup_key:
+                    prev = setup_results.get(setup_key)
+                    if prev is None or prev.ok:
+                        setup_results[setup_key] = result
 
                 command_log.append({
                     "phase": "setup",
@@ -675,17 +710,21 @@ def run_controller(cfg: ControllerConfig) -> Dict[str, Any]:
         current_phase = Phase.BASELINE
         write_jsonl(log_dir, PhaseTransition(Phase.SETUP, Phase.BASELINE).to_dict())
 
-        # Use buildpack test plan if available
-        if selected_buildpack_instance:
+        # Use user-provided test command if available, otherwise use buildpack test plan
+        if cfg.test_cmd and cfg.test_cmd != "pytest -q":
+            # User explicitly provided a test command
+            effective_test_cmd = cfg.test_cmd
+        elif selected_buildpack_instance:
+            # Use buildpack test plan
             test_plan = selected_buildpack_instance.test_plan(buildpack_ctx)
             effective_test_cmd = " ".join(test_plan.argv)
         else:
             # Use detected test command
-            effective_test_cmd = cfg.test_cmd if cfg.test_cmd != "pytest -q" else (detected_test_cmd or "pytest -q")
+            effective_test_cmd = detected_test_cmd or "pytest -q"
 
         # Run baseline tests
         print(f"\n[BASELINE] Running: {effective_test_cmd}")
-        v = _run_tests_in_sandbox(sb, effective_test_cmd, cfg, command_log, selected_buildpack)
+        v = _run_tests_in_sandbox(sb, effective_test_cmd, cfg, command_log, selected_buildpack, selected_buildpack_instance)
         baseline_output = (v.stdout or "") + "\n" + (v.stderr or "")
 
         write_jsonl(log_dir, {
@@ -698,7 +737,7 @@ def run_controller(cfg: ControllerConfig) -> Dict[str, Any]:
 
         # Handle pytest exit code 2 (no tests found)
         if v.exit_code == 2 and not v.ok:
-            print(f"\n[BASELINE] Exit code 2 detected - no tests found")
+            print("\n[BASELINE] Exit code 2 detected - no tests found")
             # Try alternative test commands based on buildpack
             if selected_buildpack_instance:
                 # Buildpack-specific fallbacks
@@ -719,7 +758,7 @@ def run_controller(cfg: ControllerConfig) -> Dict[str, Any]:
                 if suggestions:
                     suggested_cmd = suggestions[0]
                     print(f"\n[BASELINE] Retrying with: {suggested_cmd}")
-                    v = _run_tests_in_sandbox(sb, suggested_cmd, cfg, command_log, selected_buildpack)
+                    v = _run_tests_in_sandbox(sb, suggested_cmd, cfg, command_log, selected_buildpack, selected_buildpack_instance)
                     baseline_output = (v.stdout or "") + "\n" + (v.stderr or "")
 
                     write_jsonl(log_dir, {
@@ -735,7 +774,7 @@ def run_controller(cfg: ControllerConfig) -> Dict[str, Any]:
                         print(f"  Using new test command: {effective_test_cmd}")
 
         if v.ok:
-            print(f"\n[BASELINE] SUCCESS! All tests passing at baseline.")
+            print("\n[BASELINE] SUCCESS! All tests passing at baseline.")
             return {
                 "ok": True,
                 "sandbox": sb.root,
@@ -755,7 +794,7 @@ def run_controller(cfg: ControllerConfig) -> Dict[str, Any]:
         while step < max_iterations:
             # Progress reporting
             print(f"\n[Step {step}] Running tests...")
-            v = _run_tests_in_sandbox(sb, effective_test_cmd, cfg, command_log, selected_buildpack)
+            v = _run_tests_in_sandbox(sb, effective_test_cmd, cfg, command_log, selected_buildpack, selected_buildpack_instance)
             final_output = (v.stdout or "") + "\n" + (v.stderr or "")
 
             print(f"[Step {step}] Tests: {'PASS' if v.ok else 'FAIL'} | Failing: {len(v.failing_tests)} tests")
@@ -833,7 +872,7 @@ def run_controller(cfg: ControllerConfig) -> Dict[str, Any]:
 
             # ask model (try multiple temps for diversity)
             winner: Optional[str] = None
-            patches_to_evaluate = []
+            patches_to_evaluate: List[Tuple[str, float]] = []
             call_model = get_model_client(cfg.model)
             for t in cfg.temps:
                 resp = call_model(model_input, temperature=t)
@@ -900,7 +939,7 @@ def run_controller(cfg: ControllerConfig) -> Dict[str, Any]:
                             print(f"[Step {step}] Skipping duplicate patch hash")
                             continue
                         bad_hashes.add(dh)
-                        patches_to_evaluate.append(diff)
+                        patches_to_evaluate.append((diff, t))
 
             # Evaluate patches
             if patches_to_evaluate:
@@ -908,11 +947,11 @@ def run_controller(cfg: ControllerConfig) -> Dict[str, Any]:
                 print(f"[Step {step}] Evaluating {len(patches_to_evaluate)} patch(es)...")
 
                 # Validate patch hygiene
-                valid_patches = []
-                for diff in patches_to_evaluate:
+                valid_patches: List[Tuple[str, float]] = []
+                for diff, temp in patches_to_evaluate:
                     hygiene_result = validate_patch_hygiene(diff, PatchHygieneConfig())
                     if hygiene_result.is_valid:
-                        valid_patches.append(diff)
+                        valid_patches.append((diff, temp))
                     else:
                         print(f"[Step {step}] Patch rejected by hygiene gates: {hygiene_result.violations}")
                         write_jsonl(log_dir, {
@@ -924,23 +963,34 @@ def run_controller(cfg: ControllerConfig) -> Dict[str, Any]:
                 if valid_patches:
                     # Evaluate in parallel worktrees
                     results = evaluate_patches_parallel(
-                        sb, valid_patches, effective_test_cmd,
-                        temps=cfg.temps, timeout_sec=cfg.focus_timeout,
-                        use_docker=not cfg.unsafe_host_exec,
-                        docker_image=selected_buildpack,
+                        sb,
+                        valid_patches,
+                        pd.focus_test_cmd,
+                        effective_test_cmd,
                     )
 
                     winner = find_first_successful_patch(results)
                     if winner:
                         print(f"[Step {step}] ✅ Found winning patch!")
-                        write_jsonl(log_dir, {"phase": "winner_found", "step": step, "winner_hash": _diff_hash(winner)})
+                        write_jsonl(
+                            log_dir,
+                            {
+                                "phase": "winner_found",
+                                "step": step,
+                                "winner_hash": winner.diff_hash,
+                            },
+                        )
                         # Apply winner to main repo
-                        apply_patch(sb, winner)
-                        winner_diff = winner
+                        apply_patch(sb, winner.diff)
+                        winner_diff = winner.diff
+                        current_phase = Phase.FINAL_VERIFY
                         break
                     else:
                         print(f"[Step {step}] No patch passed verification")
-                        write_jsonl(log_dir, {"phase": "no_winner", "step": step, "attempted": len(valid_patches)})
+                        write_jsonl(
+                            log_dir,
+                            {"phase": "no_winner", "step": step, "attempted": len(valid_patches)},
+                        )
 
             step += 1
 
@@ -948,12 +998,12 @@ def run_controller(cfg: ControllerConfig) -> Dict[str, Any]:
         if current_phase == Phase.FINAL_VERIFY:
             write_jsonl(log_dir, PhaseTransition(Phase.REPAIR_LOOP, Phase.FINAL_VERIFY).to_dict())
 
-            print(f"\n[FINAL_VERIFY] Running full test suite...")
-            v = _run_tests_in_sandbox(sb, effective_test_cmd, cfg, command_log, selected_buildpack)
+            print("\n[FINAL_VERIFY] Running full test suite...")
+            v = _run_tests_in_sandbox(sb, effective_test_cmd, cfg, command_log, selected_buildpack, selected_buildpack_instance)
             final_output = (v.stdout or "") + "\n" + (v.stderr or "")
 
             if v.ok:
-                print(f"\n✅ FINAL SUCCESS! All tests passing.")
+                print("\n✅ FINAL SUCCESS! All tests passing.")
             else:
                 print(f"\n⚠️  Final verify failed: {len(v.failing_tests)} failing tests")
                 current_phase = Phase.BAILOUT
@@ -1011,6 +1061,7 @@ def _run_tests_in_sandbox(
     cfg: ControllerConfig,
     command_log: List[Dict[str, Any]],
     docker_image: str,
+    buildpack_instance=None,
 ) -> VerifyResult:
     """Run tests in Docker or on host based on configuration.
 
@@ -1020,6 +1071,7 @@ def _run_tests_in_sandbox(
         cfg: Controller configuration.
         command_log: Command execution log.
         docker_image: Docker image to use for execution.
+        buildpack_instance: Optional buildpack instance for failure parsing.
 
     Returns:
         VerifyResult with test results.
@@ -1041,10 +1093,16 @@ def _run_tests_in_sandbox(
             "timed_out": result.timed_out,
         })
 
-        # Convert DockerResult to VerifyResult
-        from .parsers import parse_pytest_failures, error_signature
-        failing_tests = parse_pytest_failures(result.stdout + result.stderr)
-        sig = error_signature(result.stdout, result.stderr)
+        # Use buildpack's parse_failures if available, otherwise fallback to legacy parser
+        if buildpack_instance and hasattr(buildpack_instance, 'parse_failures'):
+            failure_info = buildpack_instance.parse_failures(result.stdout, result.stderr)
+            failing_tests = failure_info.failing_tests
+            sig = failure_info.signature
+        else:
+            from .parsers import parse_pytest_failures, error_signature
+            failing_tests = parse_pytest_failures(result.stdout + result.stderr)
+            sig = error_signature(result.stdout, result.stderr)
+        
         return VerifyResult(
             ok=result.ok,
             exit_code=result.exit_code,

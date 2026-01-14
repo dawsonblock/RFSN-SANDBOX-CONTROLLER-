@@ -1,0 +1,45 @@
+[
+  {
+    "phase": "setup",
+    "command": "python -m pip install -U pip setuptools wheel",
+    "exit_code": 0,
+    "ok": true,
+    "stdout": "Requirement already satisfied: pip in /opt/venv/lib/python3.11/site-packages (24.0)\nCollecting pip\n  Downloading pip-25.3-py3-none-any.whl.metadata (4.7 kB)\nRequirement already satisfied: setuptools in /opt/venv/lib/python3.11/site-packages (79.0.1)\nCollecting setuptools\n  Downloading setuptools-80.9.0-py3-none-any.whl.metadata (6.6 kB)\nCollecting wheel\n  Downloading wheel-0.45.1-py3-none-any.whl.metadata (2.3 kB)\nDownloading pip-25.3-py3-none-any.whl (1.8 MB)\n   \u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501 1.8/1.8 MB 5.7 MB/s eta 0:00:00\nDownloading setuptools-80.9.0-py3-none-any.whl (1.2 MB)\n   \u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501 1.2/1.2 MB 11.5 MB/s eta 0:00:00\nDownloading wheel-0.45.1-py3-none-any.whl (72 kB)\n   \u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501 72.5/72.5 kB 14.9 MB/s eta 0:00:00\nInstalling collected packages: wheel, setuptools, pip\n  Attempting uninstall: setuptools\n    Found existing installation: setuptools 79.0.1\n    Uninstalling setuptools-79.0.1:\n      Successfully un",
+    "stderr": ""
+  },
+  {
+    "phase": "setup",
+    "command": "python -m pip install pytest",
+    "exit_code": 0,
+    "ok": true,
+    "stdout": "Collecting pytest\n  Downloading pytest-9.0.2-py3-none-any.whl.metadata (7.6 kB)\nCollecting iniconfig>=1.0.1 (from pytest)\n  Downloading iniconfig-2.3.0-py3-none-any.whl.metadata (2.5 kB)\nCollecting packaging>=22 (from pytest)\n  Downloading packaging-25.0-py3-none-any.whl.metadata (3.3 kB)\nCollecting pluggy<2,>=1.5 (from pytest)\n  Downloading pluggy-1.6.0-py3-none-any.whl.metadata (4.8 kB)\nCollecting pygments>=2.7.2 (from pytest)\n  Downloading pygments-2.19.2-py3-none-any.whl.metadata (2.5 kB)\nDownloading pytest-9.0.2-py3-none-any.whl (374 kB)\nDownloading pluggy-1.6.0-py3-none-any.whl (20 kB)\nDownloading iniconfig-2.3.0-py3-none-any.whl (7.5 kB)\nDownloading packaging-25.0-py3-none-any.whl (66 kB)\nDownloading pygments-2.19.2-py3-none-any.whl (1.2 MB)\n   \u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501 1.2/1.2 MB 12.6 MB/s  0:00:00\nInstalling collected packages: pygments, pluggy, packaging, iniconfig, pytest\n\nSuccessfully installed iniconfig-2.3.0 packaging-25.0 pluggy-1.6.0 pygments-2.19.2 pytes",
+    "stderr": ""
+  },
+  {
+    "phase": "test",
+    "command": "pytest -q python_testcases/test_quicksort.py",
+    "exit_code": 1,
+    "ok": false,
+    "stdout": ".F...........                                                            [100%]\n=================================== FAILURES ===================================\n____________________ test_quicksort[input_data1-expected1] _____________________\n\ninput_data = [[3, 1, 4, 1, 5, 9, ...]], expected = [1, 1, 2, 3, 3, 3, ...]\n\n    @pytest.mark.parametrize(\"input_data,expected\", testdata)\n    def test_quicksort(input_data, expected):\n>       assert quicksort(*input_data) == expected\nE       assert [1, 2, 3, 4, 5, 6, ...] == [1, 1, 2, 3, 3, 3, ...]\nE         \nE         At index 1 diff: 2 != 1\nE         Right contains 7 more items, first extra item: 5\nE         Use -v to get more diff\n\npython_testcases/test_quicksort.py:15: AssertionError\n=========================== short test summary info ============================\nFAILED python_testcases/test_quicksort.py::test_quicksort[input_data1-expected1]\n1 failed, 12 passed in 0.05s\n",
+    "stderr": "",
+    "timed_out": false
+  },
+  {
+    "phase": "test",
+    "command": "pytest -q python_testcases/test_quicksort.py",
+    "exit_code": 1,
+    "ok": false,
+    "stdout": ".F...........                                                            [100%]\n=================================== FAILURES ===================================\n____________________ test_quicksort[input_data1-expected1] _____________________\n\ninput_data = [[3, 1, 4, 1, 5, 9, ...]], expected = [1, 1, 2, 3, 3, 3, ...]\n\n    @pytest.mark.parametrize(\"input_data,expected\", testdata)\n    def test_quicksort(input_data, expected):\n>       assert quicksort(*input_data) == expected\nE       assert [1, 2, 3, 4, 5, 6, ...] == [1, 1, 2, 3, 3, 3, ...]\nE         \nE         At index 1 diff: 2 != 1\nE         Right contains 7 more items, first extra item: 5\nE         Use -v to get more diff\n\npython_testcases/test_quicksort.py:15: AssertionError\n=========================== short test summary info ============================\nFAILED python_testcases/test_quicksort.py::test_quicksort[input_data1-expected1]\n1 failed, 12 passed in 0.03s\n",
+    "stderr": "",
+    "timed_out": false
+  },
+  {
+    "phase": "test",
+    "command": "pytest -q python_testcases/test_quicksort.py",
+    "exit_code": 0,
+    "ok": true,
+    "stdout": ".............                                                            [100%]\n13 passed in 0.02s\n",
+    "stderr": "",
+    "timed_out": false
+  }
+]

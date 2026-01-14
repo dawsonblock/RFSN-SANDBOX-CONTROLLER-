@@ -1,0 +1,118 @@
+[
+  {
+    "phase": "setup",
+    "command": "gradle --no-daemon testClasses",
+    "exit_code": 127,
+    "ok": false,
+    "stdout": "",
+    "stderr": "Unable to find image 'eclipse-temurin:17-jdk' locally\n17-jdk: Pulling from library/eclipse-temurin\ne62b83f326b1: Pulling fs layer\n8464fa6d3b37: Pulling fs layer\n97dd3f0ce510: Pulling fs layer\nd1df4e1e5cfa: Pulling fs layer\nf6753550c2f3: Pulling fs layer\nf6753550c2f3: Download complete\na0f892ff1808: Download complete\n8464fa6d3b37: Download complete\n2cf36e546afa: Download complete\n97dd3f0ce510: Download complete\n97dd3f0ce510: Pull complete\nd1df4e1e5cfa: Download complete\nd1df4e1e5cfa: Pull complete\ne62b83f326b1: Download complete\nf6753550c2f3: Pull complete\n8464fa6d3b37: Pull complete\ne62b83f326b1: Pull complete\nDigest: sha256:7995efb7f9276fc16433aa8e2856a06082cd09f7f6603579db2534937ccc6778\nStatus: Downloaded newer image for eclipse-temurin:17-jdk\nsh: 1: gradle: not found\n"
+  },
+  {
+    "phase": "test",
+    "command": "pytest -q python_testcases/test_quicksort.py",
+    "exit_code": 127,
+    "ok": false,
+    "stdout": "",
+    "stderr": "sh: 1: pytest: not found\n",
+    "timed_out": false
+  },
+  {
+    "phase": "test",
+    "command": "pytest -q python_testcases/test_quicksort.py",
+    "exit_code": 127,
+    "ok": false,
+    "stdout": "",
+    "stderr": "sh: 1: pytest: not found\n",
+    "timed_out": false
+  },
+  {
+    "phase": "test",
+    "command": "pytest -q python_testcases/test_quicksort.py",
+    "exit_code": 127,
+    "ok": false,
+    "stdout": "",
+    "stderr": "sh: 1: pytest: not found\n",
+    "timed_out": false
+  },
+  {
+    "phase": "test",
+    "command": "pytest -q python_testcases/test_quicksort.py",
+    "exit_code": 127,
+    "ok": false,
+    "stdout": "",
+    "stderr": "sh: 1: pytest: not found\n",
+    "timed_out": false
+  },
+  {
+    "phase": "test",
+    "command": "pytest -q python_testcases/test_quicksort.py",
+    "exit_code": 127,
+    "ok": false,
+    "stdout": "",
+    "stderr": "sh: 1: pytest: not found\n",
+    "timed_out": false
+  },
+  {
+    "phase": "test",
+    "command": "pytest -q python_testcases/test_quicksort.py",
+    "exit_code": 127,
+    "ok": false,
+    "stdout": "",
+    "stderr": "sh: 1: pytest: not found\n",
+    "timed_out": false
+  },
+  {
+    "phase": "test",
+    "command": "pytest -q python_testcases/test_quicksort.py",
+    "exit_code": 127,
+    "ok": false,
+    "stdout": "",
+    "stderr": "sh: 1: pytest: not found\n",
+    "timed_out": false
+  },
+  {
+    "phase": "test",
+    "command": "pytest -q python_testcases/test_quicksort.py",
+    "exit_code": 127,
+    "ok": false,
+    "stdout": "",
+    "stderr": "sh: 1: pytest: not found\n",
+    "timed_out": false
+  },
+  {
+    "phase": "test",
+    "command": "pytest -q python_testcases/test_quicksort.py",
+    "exit_code": 127,
+    "ok": false,
+    "stdout": "",
+    "stderr": "sh: 1: pytest: not found\n",
+    "timed_out": false
+  },
+  {
+    "phase": "test",
+    "command": "pytest -q python_testcases/test_quicksort.py",
+    "exit_code": 127,
+    "ok": false,
+    "stdout": "",
+    "stderr": "sh: 1: pytest: not found\n",
+    "timed_out": false
+  },
+  {
+    "phase": "test",
+    "command": "pytest -q python_testcases/test_quicksort.py",
+    "exit_code": 127,
+    "ok": false,
+    "stdout": "",
+    "stderr": "sh: 1: pytest: not found\n",
+    "timed_out": false
+  },
+  {
+    "phase": "test",
+    "command": "pytest -q python_testcases/test_quicksort.py",
+    "exit_code": 127,
+    "ok": false,
+    "stdout": "",
+    "stderr": "sh: 1: pytest: not found\n",
+    "timed_out": false
+  }
+]

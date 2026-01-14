@@ -147,15 +147,39 @@ def reset_hard(sb: Sandbox) -> Dict[str, Any]:
     return {"ok": ok, "stdout": o1 + o2, "stderr": e1 + e2}
 
 
-def list_tree(sb: Sandbox, max_files: int = 400) -> Dict[str, Any]:
-    """Return a flattened list of files in the repository, pruning junk directories."""
+# Cache for expensive operations
+_tree_cache: Dict[str, Tuple[float, List[str]]] = {}
+_file_cache: Dict[str, Tuple[float, str]] = {}
+_cache_ttl = 300  # 5 minutes
+
+
+def list_tree(sb: Sandbox, max_files: int = 400, use_cache: bool = True) -> Dict[str, Any]:
+    """Return a flattened list of files in the repository, pruning junk directories.
+    
+    Args:
+        sb: The sandbox instance.
+        max_files: Maximum number of files to return.
+        use_cache: Whether to use cached results if available.
+    
+    Returns:
+        Dictionary with ok status and files list.
+    """
+    import time
+    cache_key = f"{sb.repo_dir}:{max_files}"
+    
+    # Check cache
+    if use_cache and cache_key in _tree_cache:
+        timestamp, files = _tree_cache[cache_key]
+        if time.time() - timestamp < _cache_ttl:
+            return {"ok": True, "files": files[:max_files]}
+    
     files: List[str] = []
     for root, dirs, fnames in os.walk(sb.repo_dir):
         rel_root = os.path.relpath(root, sb.repo_dir).replace("\\", "/")
         if rel_root.startswith(".git"):
             continue
         # prune common junk
-        dirs[:] = [d for d in dirs if d not in [".git", "node_modules", ".venv", "venv", "__pycache__"]]
+        dirs[:] = [d for d in dirs if d not in [".git", "node_modules", ".venv", "venv", "__pycache__", "dist", "build", ".next", "out", "target"]]
         for f in fnames:
             rel = os.path.normpath(os.path.join(rel_root, f)).replace("\\", "/")
             if rel.startswith(".git/"):
@@ -163,20 +187,42 @@ def list_tree(sb: Sandbox, max_files: int = 400) -> Dict[str, Any]:
             files.append(rel.lstrip("./"))
             if len(files) >= max_files:
                 files.sort()
+                _tree_cache[cache_key] = (time.time(), files)
                 return {"ok": True, "files": files}
     files.sort()
+    _tree_cache[cache_key] = (time.time(), files)
     return {"ok": True, "files": files}
 
 
-def read_file(sb: Sandbox, path: str, max_bytes: int = 120_000) -> Dict[str, Any]:
-    """Read a file from the repository, returning its text truncated to max_bytes."""
+def read_file(sb: Sandbox, path: str, max_bytes: int = 120_000, use_cache: bool = True) -> Dict[str, Any]:
+    """Read a file from the repository, returning its text truncated to max_bytes.
+    
+    Args:
+        sb: The sandbox instance.
+        path: Path to the file (relative to repo root).
+        max_bytes: Maximum bytes to read.
+        use_cache: Whether to use cached results if available.
+    
+    Returns:
+        Dictionary with ok status, content, and path.
+    """
+    import time
     path = path.lstrip("./").replace("\\", "/")
     full_path = os.path.join(sb.repo_dir, path)
+    cache_key = f"{full_path}:{max_bytes}"
+    
+    # Check cache
+    if use_cache and cache_key in _file_cache:
+        timestamp, content = _file_cache[cache_key]
+        if time.time() - timestamp < _cache_ttl:
+            return {"ok": True, "content": content, "path": path}
+    
     if not os.path.exists(full_path):
         return {"ok": False, "error": f"File not found: {path}"}
     try:
         with open(full_path, "r", encoding="utf-8", errors="ignore") as f:
             content = f.read(max_bytes)
+        _file_cache[cache_key] = (time.time(), content)
         return {"ok": True, "content": content, "path": path}
     except Exception as e:
         return {"ok": False, "error": str(e)}
@@ -447,6 +493,7 @@ def docker_run(
     mem_mb: int = 4096,
     pids: int = 256,
     read_only: bool = False,
+    use_cache: bool = True,
 ) -> DockerResult:
     """Run a command inside a Docker container with the repo mounted.
 
@@ -460,6 +507,7 @@ def docker_run(
         mem_mb: Memory limit in MB.
         pids: Process ID limit.
         read_only: Whether to mount repo as read-only with /tmp as tmpfs.
+        use_cache: Whether to use cache volumes for faster dependency installs.
 
     Returns:
         DockerResult with execution status and output.
@@ -471,6 +519,29 @@ def docker_run(
             "-v", f"{sb.repo_dir}:/repo",
             "-w", "/repo",
         ]
+
+        is_python_image = docker_image.split(":", 1)[0] == "python"
+        if is_python_image:
+            venv_host_dir = os.path.join(sb.root, "venv")
+            os.makedirs(venv_host_dir, exist_ok=True)
+            docker_cmd.extend([
+                "-v",
+                f"{venv_host_dir}:/opt/venv",
+            ])
+
+        # Add cache volumes for faster dependency installs
+        if use_cache:
+            # npm/yarn/pnpm cache
+            docker_cmd.extend([
+                "-v", "npm-cache:/root/.npm",
+                "-v", "yarn-cache:/usr/local/share/.cache/yarn",
+                "-v", "pnpm-cache:/root/.local/share/pnpm/store",
+            ])
+
+            if is_python_image:
+                docker_cmd.extend([
+                    "-v", "pip-cache:/root/.cache/pip",
+                ])
 
         # Resource limits
         docker_cmd.extend([
@@ -488,14 +559,23 @@ def docker_run(
         if not network:
             docker_cmd.append("--network=none")
 
-        # Environment variables
+        # Environment variables for optimization
         docker_cmd.extend([
             "-e", "TZ=UTC",
             "-e", "PYTHONHASHSEED=0",
             "-e", "PIP_DISABLE_PIP_VERSION_CHECK=1",
-            "-e", "PIP_NO_CACHE_DIR=1",
+            "-e", "PIP_NO_CACHE_DIR=0",  # Enable pip cache for speed
             "-e", "LC_ALL=C.UTF-8",
+            "-e", "npm_config_cache=/root/.npm",
+            "-e", "YARN_CACHE_FOLDER=/usr/local/share/.cache/yarn",
         ])
+
+        if is_python_image:
+            cmd = (
+                "[ -x /opt/venv/bin/python ] || python -m venv /opt/venv; "
+                ". /opt/venv/bin/activate; "
+                + cmd
+            )
 
         docker_cmd.extend([docker_image, "sh", "-c", cmd])
 
@@ -568,7 +648,7 @@ def docker_install(
     """
     return docker_run(
         sb, cmd, timeout_sec=timeout_sec, network=True, docker_image=docker_image,
-        cpu=cpu, mem_mb=mem_mb, pids=pids, read_only=read_only
+        cpu=cpu, mem_mb=mem_mb, pids=pids, read_only=read_only, use_cache=True
     )
 
 
@@ -601,5 +681,5 @@ def docker_test(
     network_enabled = cmd.startswith("npx ")
     return docker_run(
         sb, cmd, timeout_sec=timeout_sec, network=network_enabled, docker_image=docker_image,
-        cpu=cpu, mem_mb=mem_mb, pids=pids, read_only=read_only
+        cpu=cpu, mem_mb=mem_mb, pids=pids, read_only=read_only, use_cache=True
     )

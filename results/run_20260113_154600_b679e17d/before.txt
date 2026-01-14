@@ -1,0 +1,18 @@
+
+npm warn exec The following package was not found and will be installed: jest@30.2.0
+npm warn deprecated inflight@1.0.6: This module is not supported, and leaks memory. Do not use it. Check out lru-cache if you want a good and tested way to coalesce async requests by a key value, which is much more comprehensive and powerful.
+npm warn deprecated glob@7.2.3: Glob versions prior to v9 are no longer supported
+Error: Could not find a config file based on provided values:
+path: "/repo"
+cwd: "/repo"
+Config paths must be specified by either a direct path to a config
+file, or a path to a directory. If directory is given, Jest will try to
+traverse directory tree up, until it finds one of those files in exact order: "jest.config.js" or "jest.config.ts" or "jest.config.mjs" or "jest.config.cjs" or "jest.config.cts" or "jest.config.json".
+    at resolveConfigPathByTraversing (/root/.npm/_npx/b8d86e6551a4f492/node_modules/jest-config/build/index.js:2493:11)
+    at resolveConfigPathByTraversing (/root/.npm/_npx/b8d86e6551a4f492/node_modules/jest-config/build/index.js:2497:10)
+    at resolveConfigPath (/root/.npm/_npx/b8d86e6551a4f492/node_modules/jest-config/build/index.js:2464:10)
+    at readInitialOptions (/root/.npm/_npx/b8d86e6551a4f492/node_modules/jest-config/build/index.js:1145:53)
+    at readConfig (/root/.npm/_npx/b8d86e6551a4f492/node_modules/jest-config/build/index.js:918:13)
+    at readConfigs (/root/.npm/_npx/b8d86e6551a4f492/node_modules/jest-config/build/index.js:1168:32)
+    at runCLI (/root/.npm/_npx/b8d86e6551a4f492/node_modules/@jest/core/build/index.js:1407:43)
+    at Object.run (/root/.npm/_npx/b8d86e6551a4f492/node_modules/jest-cli/build/index.js:656:34)

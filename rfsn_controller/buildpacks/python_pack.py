@@ -5,7 +5,7 @@ Handles Python repositories with pip, poetry, or other dependency managers.
 
 import hashlib
 import re
-from typing import List, Optional, Dict, Any
+from typing import List, Optional
 
 from .base import (
     Buildpack,
@@ -46,23 +46,32 @@ class PythonBuildpack(Buildpack):
             "requirements.lock",
             "tox.ini",
             "noxfile.py",
+            "conftest.py",  # pytest configuration
+            "pytest.ini",  # pytest configuration
+            "py.typed",  # typed packages
         ]
 
         found_indicators = []
         for indicator in python_indicators:
-            if indicator in ctx.files or any(f.endswith(indicator) for f in ctx.repo_tree):
+            # Check exact filename match in files dict
+            if indicator in ctx.files:
+                found_indicators.append(indicator)
+            # Check for exact filename match in repo_tree (not just endsWith)
+            elif any(f == indicator or f.endswith("/" + indicator) for f in ctx.repo_tree):
                 found_indicators.append(indicator)
 
         if not found_indicators:
             return None
 
         # Calculate confidence based on indicators
-        confidence = 0.5
+        confidence = 0.6
         if "pyproject.toml" in found_indicators:
             confidence += 0.2
         if "requirements.txt" in found_indicators:
             confidence += 0.2
         if "setup.py" in found_indicators:
+            confidence += 0.1
+        if "conftest.py" in found_indicators:
             confidence += 0.1
 
         confidence = min(confidence, 1.0)
@@ -77,7 +86,7 @@ class PythonBuildpack(Buildpack):
         """Return the Docker image for Python.
 
         Returns:
-            Docker image tag.
+            Docker image tag (alpine-based for smaller size).
         """
         return "python:3.11-slim"
 
@@ -119,6 +128,14 @@ class PythonBuildpack(Buildpack):
             argv=["python", "-m", "pip", "install", "-U", "pip", "setuptools", "wheel"],
             description="Upgrade pip, setuptools, wheel",
             timeout_sec=180,
+            network_required=True,
+        ))
+
+        # Install pytest for testing
+        steps.append(Step(
+            argv=["python", "-m", "pip", "install", "pytest"],
+            description="Install pytest",
+            timeout_sec=120,
             network_required=True,
         ))
 

@@ -47,7 +47,11 @@ class NodeBuildpack(Buildpack):
 
         found_indicators = []
         for indicator in node_indicators:
-            if indicator in ctx.files or any(f.endswith(indicator) for f in ctx.repo_tree):
+            # Check exact filename match in files dict
+            if indicator in ctx.files:
+                found_indicators.append(indicator)
+            # Check for exact filename match in repo_tree (not just endsWith)
+            elif any(f == indicator or f.endswith("/" + indicator) for f in ctx.repo_tree):
                 found_indicators.append(indicator)
 
         if not found_indicators:
@@ -90,9 +94,9 @@ class NodeBuildpack(Buildpack):
         """Return the Docker image for Node.js.
 
         Returns:
-            Docker image tag.
+            Docker image tag (alpine-based for smaller size).
         """
-        return "node:20-bookworm-slim"
+        return "node:20-alpine"
 
     def sysdeps_whitelist(self) -> List[str]:
         """Return Node.js-specific system dependencies.
@@ -127,28 +131,29 @@ class NodeBuildpack(Buildpack):
 
         # Install dependencies based on package manager
         if package_manager == "pnpm":
+            # Try pnpm with corepack, fall back to npm if unavailable
             steps.append(Step(
-                argv=["corepack", "enable"],
-                description="Enable corepack for pnpm",
+                argv=["sh", "-c", "corepack enable && pnpm --version || echo 'pnpm_not_available'"],
+                description="Check if pnpm is available",
                 timeout_sec=60,
                 network_required=True,
             ))
             steps.append(Step(
-                argv=["pnpm", "install", "--frozen-lockfile"],
-                description="Install dependencies with pnpm",
+                argv=["sh", "-c", "pnpm install --frozen-lockfile 2>/dev/null || npm install"],
+                description="Install dependencies (pnpm or npm fallback)",
                 timeout_sec=300,
                 network_required=True,
             ))
         elif package_manager == "yarn":
             steps.append(Step(
-                argv=["corepack", "enable"],
-                description="Enable corepack for yarn",
+                argv=["sh", "-c", "corepack enable && yarn --version || echo 'yarn_not_available'"],
+                description="Check if yarn is available",
                 timeout_sec=60,
                 network_required=True,
             ))
             steps.append(Step(
-                argv=["yarn", "install", "--frozen-lockfile"],
-                description="Install dependencies with yarn",
+                argv=["sh", "-c", "yarn install --frozen-lockfile 2>/dev/null || npm install"],
+                description="Install dependencies (yarn or npm fallback)",
                 timeout_sec=300,
                 network_required=True,
             ))

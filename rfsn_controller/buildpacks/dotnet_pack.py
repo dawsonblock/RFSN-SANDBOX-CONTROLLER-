@@ -36,23 +36,23 @@ class DotnetBuildpack(Buildpack):
             DetectResult if .NET detected, None otherwise.
         """
         # Check for .NET indicator files
-        dotnet_indicators = [
-            "*.csproj",
-            "*.sln",
-            "global.json",
-            "Directory.Build.props",
-        ]
-
         found_indicators = []
-        for indicator in dotnet_indicators:
-            if indicator in ctx.files or any(f.endswith(indicator) for f in ctx.repo_tree):
-                found_indicators.append(indicator)
+        if any(f.endswith(".csproj") for f in ctx.repo_tree):
+            found_indicators.append(".csproj")
+        if any(f.endswith(".sln") for f in ctx.repo_tree):
+            found_indicators.append(".sln")
+        if "global.json" in ctx.files or any(f.endswith("/global.json") or f == "global.json" for f in ctx.repo_tree):
+            found_indicators.append("global.json")
+        if "Directory.Build.props" in ctx.files or any(
+            f.endswith("/Directory.Build.props") or f == "Directory.Build.props" for f in ctx.repo_tree
+        ):
+            found_indicators.append("Directory.Build.props")
 
         if not found_indicators:
             return None
 
         # .csproj or .sln is the primary indicator
-        if not any(f.endswith(".csproj") or f.endswith(".sln") for f in ctx.repo_tree):
+        if ".csproj" not in found_indicators and ".sln" not in found_indicators:
             return None
 
         confidence = 0.9

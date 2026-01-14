@@ -1,0 +1,20 @@
+.F...........                                                            [100%]
+=================================== FAILURES ===================================
+____________________ test_quicksort[input_data1-expected1] _____________________
+
+input_data = [[3, 1, 4, 1, 5, 9, ...]], expected = [1, 1, 2, 3, 3, 3, ...]
+
+    @pytest.mark.parametrize("input_data,expected", testdata)
+    def test_quicksort(input_data, expected):
+>       assert quicksort(*input_data) == expected
+E       assert [1, 2, 3, 4, 5, 6, ...] == [1, 1, 2, 3, 3, 3, ...]
+E         
+E         At index 1 diff: 2 != 1
+E         Right contains 7 more items, first extra item: 5
+E         Use -v to get more diff
+
+python_testcases/test_quicksort.py:15: AssertionError
+=========================== short test summary info ============================
+FAILED python_testcases/test_quicksort.py::test_quicksort[input_data1-expected1]
+1 failed, 12 passed in 0.21s
+

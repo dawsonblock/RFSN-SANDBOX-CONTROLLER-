@@ -1,0 +1,126 @@
+[
+  {
+    "phase": "setup",
+    "command": "sh -c corepack enable && pnpm --version || echo 'pnpm_not_available'",
+    "exit_code": 0,
+    "ok": true,
+    "stdout": "Corepack - 0.34.1\n\n  $ corepack <command>\n\nGeneral commands\n\n  corepack cache clean\n    Cleans Corepack cache\n\n  corepack disable [--install-directory #0] ...\n    Remove the Corepack shims from the install directory\n\n  corepack enable [--install-directory #0] ...\n    Add the Corepack shims to the install directory\n\n  corepack install\n    Install the package manager configured in the local project\n\n  corepack install <-g,--global> [--cache-only] ...\n    Install package managers on the system\n\n  corepack pack [--json] [-o,--output #0] ...\n    Store package managers in a tarball\n\n  corepack up\n    Update the package manager used in the current project\n\n  corepack use <pattern>\n    Define the package manager to use for the current project\n\nYou can also print more details about any of these commands by calling them with \nthe `-h,--help` flag right after the command name.\npnpm_not_available\n",
+    "stderr": "Unable to find image 'node:20-alpine' locally\n20-alpine: Pulling from library/node\n70268380327f: Pulling fs layer\nbb9f6f8b2020: Pulling fs layer\nf6b4fb944634: Pulling fs layer\neb9824d79905: Pulling fs layer\n70268380327f: Download complete\n3e11fc0a73fb: Download complete\nc0738753dfca: Download complete\nf6b4fb944634: Download complete\nf6b4fb944634: Pull complete\nbb9f6f8b2020: Download complete\neb9824d79905: Download complete\n70268380327f: Pull complete\nbb9f6f8b2020: Pull complete\neb9824d79905: Pull complete\nDigest: sha256:658d0f63e501824d6c23e06d4bb95c71e7d704537c9d9272f488ac03a370d448\nStatus: Downloaded newer image for node:20-alpine\nsh: pnpm: not found\n"
+  },
+  {
+    "phase": "setup",
+    "command": "sh -c pnpm install --frozen-lockfile 2>/dev/null || npm install",
+    "exit_code": 254,
+    "ok": false,
+    "stdout": "",
+    "stderr": "npm error code ENOENT\nnpm error syscall open\nnpm error path /repo/package.json\nnpm error errno -2\nnpm error enoent Could not read package.json: Error: ENOENT: no such file or directory, open '/repo/package.json'\nnpm error enoent This is related to npm not being able to find a file.\nnpm error enoent\nnpm error A complete log of this run can be found in: /root/.npm/_logs/2026-01-13T21_43_17_773Z-debug-0.log\n"
+  },
+  {
+    "phase": "test",
+    "command": "npx jest --runInBand",
+    "exit_code": 1,
+    "ok": false,
+    "stdout": "",
+    "stderr": "npm warn exec The following package was not found and will be installed: jest@30.2.0\nnpm warn deprecated inflight@1.0.6: This module is not supported, and leaks memory. Do not use it. Check out lru-cache if you want a good and tested way to coalesce async requests by a key value, which is much more comprehensive and powerful.\nnpm warn deprecated glob@7.2.3: Glob versions prior to v9 are no longer supported\nError: Could not find a config file based on provided values:\npath: \"/repo\"\ncwd: \"/repo\"\nConfig paths must be specified by either a direct path to a config\nfile, or a path to a directory. If directory is given, Jest will try to\ntraverse directory tree up, until it finds one of those files in exact order: \"jest.config.js\" or \"jest.config.ts\" or \"jest.config.mjs\" or \"jest.config.cjs\" or \"jest.config.cts\" or \"jest.config.json\".\n    at resolveConfigPathByTraversing (/root/.npm/_npx/b8d86e6551a4f492/node_modules/jest-config/build/index.js:2493:11)\n    at resolveConfigPathByTraversing (/root/.npm/_npx/b8d86e6551a4f492/node_modules/jest-config/build/index.js:2497:10)\n    at resolveConfigPath (/root/.npm/_npx/b8d86e6551a4f492/node_modules/jest-config/build/index.js:2464:10)\n    at readInitialOptions (/root/.npm/_npx/b8d86e6551a4f492/node_modules/jest-config/build/index.js:1145:53)\n    at readConfig (/root/.npm/_npx/b8d86e6551a4f492/node_modules/jest-config/build/index.js:918:13)\n    at readConfigs (/root/.npm/_npx/b8d86e6551a4f492/node_modules/jest-config/build/index.js:1168:32)\n    at runCLI (/root/.npm/_npx/b8d86e6551a4f492/node_modules/@jest/core/build/index.js:1407:43)\n    at Object.run (/root/.npm/_npx/b8d86e6551a4f492/node_modules/jest-cli/build/index.js:656:34)\n",
+    "timed_out": false
+  },
+  {
+    "phase": "test",
+    "command": "npx jest --runInBand",
+    "exit_code": 1,
+    "ok": false,
+    "stdout": "",
+    "stderr": "Error: Could not find a config file based on provided values:\npath: \"/repo\"\ncwd: \"/repo\"\nConfig paths must be specified by either a direct path to a config\nfile, or a path to a directory. If directory is given, Jest will try to\ntraverse directory tree up, until it finds one of those files in exact order: \"jest.config.js\" or \"jest.config.ts\" or \"jest.config.mjs\" or \"jest.config.cjs\" or \"jest.config.cts\" or \"jest.config.json\".\n    at resolveConfigPathByTraversing (/root/.npm/_npx/b8d86e6551a4f492/node_modules/jest-config/build/index.js:2493:11)\n    at resolveConfigPathByTraversing (/root/.npm/_npx/b8d86e6551a4f492/node_modules/jest-config/build/index.js:2497:10)\n    at resolveConfigPath (/root/.npm/_npx/b8d86e6551a4f492/node_modules/jest-config/build/index.js:2464:10)\n    at readInitialOptions (/root/.npm/_npx/b8d86e6551a4f492/node_modules/jest-config/build/index.js:1145:53)\n    at readConfig (/root/.npm/_npx/b8d86e6551a4f492/node_modules/jest-config/build/index.js:918:13)\n    at readConfigs (/root/.npm/_npx/b8d86e6551a4f492/node_modules/jest-config/build/index.js:1168:32)\n    at runCLI (/root/.npm/_npx/b8d86e6551a4f492/node_modules/@jest/core/build/index.js:1407:43)\n    at Object.run (/root/.npm/_npx/b8d86e6551a4f492/node_modules/jest-cli/build/index.js:656:34)\n",
+    "timed_out": false
+  },
+  {
+    "phase": "test",
+    "command": "npx jest --runInBand",
+    "exit_code": 1,
+    "ok": false,
+    "stdout": "",
+    "stderr": "Error: Could not find a config file based on provided values:\npath: \"/repo\"\ncwd: \"/repo\"\nConfig paths must be specified by either a direct path to a config\nfile, or a path to a directory. If directory is given, Jest will try to\ntraverse directory tree up, until it finds one of those files in exact order: \"jest.config.js\" or \"jest.config.ts\" or \"jest.config.mjs\" or \"jest.config.cjs\" or \"jest.config.cts\" or \"jest.config.json\".\n    at resolveConfigPathByTraversing (/root/.npm/_npx/b8d86e6551a4f492/node_modules/jest-config/build/index.js:2493:11)\n    at resolveConfigPathByTraversing (/root/.npm/_npx/b8d86e6551a4f492/node_modules/jest-config/build/index.js:2497:10)\n    at resolveConfigPath (/root/.npm/_npx/b8d86e6551a4f492/node_modules/jest-config/build/index.js:2464:10)\n    at readInitialOptions (/root/.npm/_npx/b8d86e6551a4f492/node_modules/jest-config/build/index.js:1145:53)\n    at readConfig (/root/.npm/_npx/b8d86e6551a4f492/node_modules/jest-config/build/index.js:918:13)\n    at readConfigs (/root/.npm/_npx/b8d86e6551a4f492/node_modules/jest-config/build/index.js:1168:32)\n    at runCLI (/root/.npm/_npx/b8d86e6551a4f492/node_modules/@jest/core/build/index.js:1407:43)\n    at Object.run (/root/.npm/_npx/b8d86e6551a4f492/node_modules/jest-cli/build/index.js:656:34)\n",
+    "timed_out": false
+  },
+  {
+    "phase": "test",
+    "command": "npx jest --runInBand",
+    "exit_code": 1,
+    "ok": false,
+    "stdout": "",
+    "stderr": "Error: Could not find a config file based on provided values:\npath: \"/repo\"\ncwd: \"/repo\"\nConfig paths must be specified by either a direct path to a config\nfile, or a path to a directory. If directory is given, Jest will try to\ntraverse directory tree up, until it finds one of those files in exact order: \"jest.config.js\" or \"jest.config.ts\" or \"jest.config.mjs\" or \"jest.config.cjs\" or \"jest.config.cts\" or \"jest.config.json\".\n    at resolveConfigPathByTraversing (/root/.npm/_npx/b8d86e6551a4f492/node_modules/jest-config/build/index.js:2493:11)\n    at resolveConfigPathByTraversing (/root/.npm/_npx/b8d86e6551a4f492/node_modules/jest-config/build/index.js:2497:10)\n    at resolveConfigPath (/root/.npm/_npx/b8d86e6551a4f492/node_modules/jest-config/build/index.js:2464:10)\n    at readInitialOptions (/root/.npm/_npx/b8d86e6551a4f492/node_modules/jest-config/build/index.js:1145:53)\n    at readConfig (/root/.npm/_npx/b8d86e6551a4f492/node_modules/jest-config/build/index.js:918:13)\n    at readConfigs (/root/.npm/_npx/b8d86e6551a4f492/node_modules/jest-config/build/index.js:1168:32)\n    at runCLI (/root/.npm/_npx/b8d86e6551a4f492/node_modules/@jest/core/build/index.js:1407:43)\n    at Object.run (/root/.npm/_npx/b8d86e6551a4f492/node_modules/jest-cli/build/index.js:656:34)\n",
+    "timed_out": false
+  },
+  {
+    "phase": "test",
+    "command": "npx jest --runInBand",
+    "exit_code": 1,
+    "ok": false,
+    "stdout": "",
+    "stderr": "Error: Could not find a config file based on provided values:\npath: \"/repo\"\ncwd: \"/repo\"\nConfig paths must be specified by either a direct path to a config\nfile, or a path to a directory. If directory is given, Jest will try to\ntraverse directory tree up, until it finds one of those files in exact order: \"jest.config.js\" or \"jest.config.ts\" or \"jest.config.mjs\" or \"jest.config.cjs\" or \"jest.config.cts\" or \"jest.config.json\".\n    at resolveConfigPathByTraversing (/root/.npm/_npx/b8d86e6551a4f492/node_modules/jest-config/build/index.js:2493:11)\n    at resolveConfigPathByTraversing (/root/.npm/_npx/b8d86e6551a4f492/node_modules/jest-config/build/index.js:2497:10)\n    at resolveConfigPath (/root/.npm/_npx/b8d86e6551a4f492/node_modules/jest-config/build/index.js:2464:10)\n    at readInitialOptions (/root/.npm/_npx/b8d86e6551a4f492/node_modules/jest-config/build/index.js:1145:53)\n    at readConfig (/root/.npm/_npx/b8d86e6551a4f492/node_modules/jest-config/build/index.js:918:13)\n    at readConfigs (/root/.npm/_npx/b8d86e6551a4f492/node_modules/jest-config/build/index.js:1168:32)\n    at runCLI (/root/.npm/_npx/b8d86e6551a4f492/node_modules/@jest/core/build/index.js:1407:43)\n    at Object.run (/root/.npm/_npx/b8d86e6551a4f492/node_modules/jest-cli/build/index.js:656:34)\n",
+    "timed_out": false
+  },
+  {
+    "phase": "test",
+    "command": "npx jest --runInBand",
+    "exit_code": 1,
+    "ok": false,
+    "stdout": "",
+    "stderr": "Error: Could not find a config file based on provided values:\npath: \"/repo\"\ncwd: \"/repo\"\nConfig paths must be specified by either a direct path to a config\nfile, or a path to a directory. If directory is given, Jest will try to\ntraverse directory tree up, until it finds one of those files in exact order: \"jest.config.js\" or \"jest.config.ts\" or \"jest.config.mjs\" or \"jest.config.cjs\" or \"jest.config.cts\" or \"jest.config.json\".\n    at resolveConfigPathByTraversing (/root/.npm/_npx/b8d86e6551a4f492/node_modules/jest-config/build/index.js:2493:11)\n    at resolveConfigPathByTraversing (/root/.npm/_npx/b8d86e6551a4f492/node_modules/jest-config/build/index.js:2497:10)\n    at resolveConfigPath (/root/.npm/_npx/b8d86e6551a4f492/node_modules/jest-config/build/index.js:2464:10)\n    at readInitialOptions (/root/.npm/_npx/b8d86e6551a4f492/node_modules/jest-config/build/index.js:1145:53)\n    at readConfig (/root/.npm/_npx/b8d86e6551a4f492/node_modules/jest-config/build/index.js:918:13)\n    at readConfigs (/root/.npm/_npx/b8d86e6551a4f492/node_modules/jest-config/build/index.js:1168:32)\n    at runCLI (/root/.npm/_npx/b8d86e6551a4f492/node_modules/@jest/core/build/index.js:1407:43)\n    at Object.run (/root/.npm/_npx/b8d86e6551a4f492/node_modules/jest-cli/build/index.js:656:34)\n",
+    "timed_out": false
+  },
+  {
+    "phase": "test",
+    "command": "npx jest --runInBand",
+    "exit_code": 1,
+    "ok": false,
+    "stdout": "",
+    "stderr": "Error: Could not find a config file based on provided values:\npath: \"/repo\"\ncwd: \"/repo\"\nConfig paths must be specified by either a direct path to a config\nfile, or a path to a directory. If directory is given, Jest will try to\ntraverse directory tree up, until it finds one of those files in exact order: \"jest.config.js\" or \"jest.config.ts\" or \"jest.config.mjs\" or \"jest.config.cjs\" or \"jest.config.cts\" or \"jest.config.json\".\n    at resolveConfigPathByTraversing (/root/.npm/_npx/b8d86e6551a4f492/node_modules/jest-config/build/index.js:2493:11)\n    at resolveConfigPathByTraversing (/root/.npm/_npx/b8d86e6551a4f492/node_modules/jest-config/build/index.js:2497:10)\n    at resolveConfigPath (/root/.npm/_npx/b8d86e6551a4f492/node_modules/jest-config/build/index.js:2464:10)\n    at readInitialOptions (/root/.npm/_npx/b8d86e6551a4f492/node_modules/jest-config/build/index.js:1145:53)\n    at readConfig (/root/.npm/_npx/b8d86e6551a4f492/node_modules/jest-config/build/index.js:918:13)\n    at readConfigs (/root/.npm/_npx/b8d86e6551a4f492/node_modules/jest-config/build/index.js:1168:32)\n    at runCLI (/root/.npm/_npx/b8d86e6551a4f492/node_modules/@jest/core/build/index.js:1407:43)\n    at Object.run (/root/.npm/_npx/b8d86e6551a4f492/node_modules/jest-cli/build/index.js:656:34)\n",
+    "timed_out": false
+  },
+  {
+    "phase": "test",
+    "command": "npx jest --runInBand",
+    "exit_code": 1,
+    "ok": false,
+    "stdout": "",
+    "stderr": "Error: Could not find a config file based on provided values:\npath: \"/repo\"\ncwd: \"/repo\"\nConfig paths must be specified by either a direct path to a config\nfile, or a path to a directory. If directory is given, Jest will try to\ntraverse directory tree up, until it finds one of those files in exact order: \"jest.config.js\" or \"jest.config.ts\" or \"jest.config.mjs\" or \"jest.config.cjs\" or \"jest.config.cts\" or \"jest.config.json\".\n    at resolveConfigPathByTraversing (/root/.npm/_npx/b8d86e6551a4f492/node_modules/jest-config/build/index.js:2493:11)\n    at resolveConfigPathByTraversing (/root/.npm/_npx/b8d86e6551a4f492/node_modules/jest-config/build/index.js:2497:10)\n    at resolveConfigPath (/root/.npm/_npx/b8d86e6551a4f492/node_modules/jest-config/build/index.js:2464:10)\n    at readInitialOptions (/root/.npm/_npx/b8d86e6551a4f492/node_modules/jest-config/build/index.js:1145:53)\n    at readConfig (/root/.npm/_npx/b8d86e6551a4f492/node_modules/jest-config/build/index.js:918:13)\n    at readConfigs (/root/.npm/_npx/b8d86e6551a4f492/node_modules/jest-config/build/index.js:1168:32)\n    at runCLI (/root/.npm/_npx/b8d86e6551a4f492/node_modules/@jest/core/build/index.js:1407:43)\n    at Object.run (/root/.npm/_npx/b8d86e6551a4f492/node_modules/jest-cli/build/index.js:656:34)\n",
+    "timed_out": false
+  },
+  {
+    "phase": "test",
+    "command": "npx jest --runInBand",
+    "exit_code": 1,
+    "ok": false,
+    "stdout": "",
+    "stderr": "Error: Could not find a config file based on provided values:\npath: \"/repo\"\ncwd: \"/repo\"\nConfig paths must be specified by either a direct path to a config\nfile, or a path to a directory. If directory is given, Jest will try to\ntraverse directory tree up, until it finds one of those files in exact order: \"jest.config.js\" or \"jest.config.ts\" or \"jest.config.mjs\" or \"jest.config.cjs\" or \"jest.config.cts\" or \"jest.config.json\".\n    at resolveConfigPathByTraversing (/root/.npm/_npx/b8d86e6551a4f492/node_modules/jest-config/build/index.js:2493:11)\n    at resolveConfigPathByTraversing (/root/.npm/_npx/b8d86e6551a4f492/node_modules/jest-config/build/index.js:2497:10)\n    at resolveConfigPath (/root/.npm/_npx/b8d86e6551a4f492/node_modules/jest-config/build/index.js:2464:10)\n    at readInitialOptions (/root/.npm/_npx/b8d86e6551a4f492/node_modules/jest-config/build/index.js:1145:53)\n    at readConfig (/root/.npm/_npx/b8d86e6551a4f492/node_modules/jest-config/build/index.js:918:13)\n    at readConfigs (/root/.npm/_npx/b8d86e6551a4f492/node_modules/jest-config/build/index.js:1168:32)\n    at runCLI (/root/.npm/_npx/b8d86e6551a4f492/node_modules/@jest/core/build/index.js:1407:43)\n    at Object.run (/root/.npm/_npx/b8d86e6551a4f492/node_modules/jest-cli/build/index.js:656:34)\n",
+    "timed_out": false
+  },
+  {
+    "phase": "test",
+    "command": "npx jest --runInBand",
+    "exit_code": 1,
+    "ok": false,
+    "stdout": "",
+    "stderr": "Error: Could not find a config file based on provided values:\npath: \"/repo\"\ncwd: \"/repo\"\nConfig paths must be specified by either a direct path to a config\nfile, or a path to a directory. If directory is given, Jest will try to\ntraverse directory tree up, until it finds one of those files in exact order: \"jest.config.js\" or \"jest.config.ts\" or \"jest.config.mjs\" or \"jest.config.cjs\" or \"jest.config.cts\" or \"jest.config.json\".\n    at resolveConfigPathByTraversing (/root/.npm/_npx/b8d86e6551a4f492/node_modules/jest-config/build/index.js:2493:11)\n    at resolveConfigPathByTraversing (/root/.npm/_npx/b8d86e6551a4f492/node_modules/jest-config/build/index.js:2497:10)\n    at resolveConfigPath (/root/.npm/_npx/b8d86e6551a4f492/node_modules/jest-config/build/index.js:2464:10)\n    at readInitialOptions (/root/.npm/_npx/b8d86e6551a4f492/node_modules/jest-config/build/index.js:1145:53)\n    at readConfig (/root/.npm/_npx/b8d86e6551a4f492/node_modules/jest-config/build/index.js:918:13)\n    at readConfigs (/root/.npm/_npx/b8d86e6551a4f492/node_modules/jest-config/build/index.js:1168:32)\n    at runCLI (/root/.npm/_npx/b8d86e6551a4f492/node_modules/@jest/core/build/index.js:1407:43)\n    at Object.run (/root/.npm/_npx/b8d86e6551a4f492/node_modules/jest-cli/build/index.js:656:34)\n",
+    "timed_out": false
+  },
+  {
+    "phase": "test",
+    "command": "npx jest --runInBand",
+    "exit_code": 1,
+    "ok": false,
+    "stdout": "",
+    "stderr": "Error: Could not find a config file based on provided values:\npath: \"/repo\"\ncwd: \"/repo\"\nConfig paths must be specified by either a direct path to a config\nfile, or a path to a directory. If directory is given, Jest will try to\ntraverse directory tree up, until it finds one of those files in exact order: \"jest.config.js\" or \"jest.config.ts\" or \"jest.config.mjs\" or \"jest.config.cjs\" or \"jest.config.cts\" or \"jest.config.json\".\n    at resolveConfigPathByTraversing (/root/.npm/_npx/b8d86e6551a4f492/node_modules/jest-config/build/index.js:2493:11)\n    at resolveConfigPathByTraversing (/root/.npm/_npx/b8d86e6551a4f492/node_modules/jest-config/build/index.js:2497:10)\n    at resolveConfigPath (/root/.npm/_npx/b8d86e6551a4f492/node_modules/jest-config/build/index.js:2464:10)\n    at readInitialOptions (/root/.npm/_npx/b8d86e6551a4f492/node_modules/jest-config/build/index.js:1145:53)\n    at readConfig (/root/.npm/_npx/b8d86e6551a4f492/node_modules/jest-config/build/index.js:918:13)\n    at readConfigs (/root/.npm/_npx/b8d86e6551a4f492/node_modules/jest-config/build/index.js:1168:32)\n    at runCLI (/root/.npm/_npx/b8d86e6551a4f492/node_modules/@jest/core/build/index.js:1407:43)\n    at Object.run (/root/.npm/_npx/b8d86e6551a4f492/node_modules/jest-cli/build/index.js:656:34)\n",
+    "timed_out": false
+  },
+  {
+    "phase": "test",
+    "command": "npx jest --runInBand",
+    "exit_code": 1,
+    "ok": false,
+    "stdout": "",
+    "stderr": "Error: Could not find a config file based on provided values:\npath: \"/repo\"\ncwd: \"/repo\"\nConfig paths must be specified by either a direct path to a config\nfile, or a path to a directory. If directory is given, Jest will try to\ntraverse directory tree up, until it finds one of those files in exact order: \"jest.config.js\" or \"jest.config.ts\" or \"jest.config.mjs\" or \"jest.config.cjs\" or \"jest.config.cts\" or \"jest.config.json\".\n    at resolveConfigPathByTraversing (/root/.npm/_npx/b8d86e6551a4f492/node_modules/jest-config/build/index.js:2493:11)\n    at resolveConfigPathByTraversing (/root/.npm/_npx/b8d86e6551a4f492/node_modules/jest-config/build/index.js:2497:10)\n    at resolveConfigPath (/root/.npm/_npx/b8d86e6551a4f492/node_modules/jest-config/build/index.js:2464:10)\n    at readInitialOptions (/root/.npm/_npx/b8d86e6551a4f492/node_modules/jest-config/build/index.js:1145:53)\n    at readConfig (/root/.npm/_npx/b8d86e6551a4f492/node_modules/jest-config/build/index.js:918:13)\n    at readConfigs (/root/.npm/_npx/b8d86e6551a4f492/node_modules/jest-config/build/index.js:1168:32)\n    at runCLI (/root/.npm/_npx/b8d86e6551a4f492/node_modules/@jest/core/build/index.js:1407:43)\n    at Object.run (/root/.npm/_npx/b8d86e6551a4f492/node_modules/jest-cli/build/index.js:656:34)\n",
+    "timed_out": false
+  }
+]

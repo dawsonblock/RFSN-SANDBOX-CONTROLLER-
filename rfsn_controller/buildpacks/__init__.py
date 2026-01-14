@@ -74,17 +74,18 @@ def get_buildpack(buildpack_type: BuildpackType) -> Buildpack:
 
 
 def get_all_buildpacks() -> List[Buildpack]:
-    """Get all available buildpack instances.
+    """Get all available buildpack instances ordered by detection priority.
 
     Returns:
-        List of all buildpack instances.
+        List of all buildpack instances in priority order.
     """
+    # Order by commonality for early termination optimization
     return [
-        PythonBuildpack(),
-        NodeBuildpack(),
-        GoBuildpack(),
-        RustBuildpack(),
-        JavaBuildpack(),
-        DotnetBuildpack(),
-        PolyrepoBuildpack(),
+        PythonBuildpack(),  # Most common
+        NodeBuildpack(),    # Second most common
+        JavaBuildpack(),    # Common in enterprise
+        GoBuildpack(),      # Growing popularity
+        RustBuildpack(),    # Less common
+        DotnetBuildpack(),  # Enterprise
+        PolyrepoBuildpack(),  # Last, expensive to detect
     ]

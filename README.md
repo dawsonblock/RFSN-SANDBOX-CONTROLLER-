@@ -4,7 +4,7 @@
 
 ![RFSN Logo](https://img.shields.io/badge/RFSN-Sandbox%20Controller-blue?style=for-the-badge)
 ![Python](https://img.shields.io/badge/Python-3.9+-green?style=for-the-badge&logo=python)
-![Gemini](https://img.shields.io/badge/Gemini-2.0%20Flash-purple?style=for-the-badge&logo=google)
+![DeepSeek](https://img.shields.io/badge/DeepSeek-R1-purple?style=for-the-badge)
 ![Docker](https://img.shields.io/badge/Docker-Supported-blue?style=for-the-badge&logo=docker)
 ![License](https://img.shields.io/badge/License-MIT-orange?style=for-the-badge)
 
@@ -23,11 +23,12 @@ RFSN Sandbox Controller is an intelligent automated bug-fixing system designed f
 - 🔧 **Docker-based isolation** for secure, reproducible repairs
 - 🛡️ **Strict security hardening** with command allowlisting and URL validation
 - 🧪 **Test-driven verification** as ground truth for fixes
-- 🤖 **Gemini 2.0 Flash** for intelligent patch generation
+- 🤖 **DeepSeek R1** for intelligent patch generation (also supports Gemini)
 - ⚡ **Parallel patch evaluation** using isolated git worktrees
-- 🎯 **Multi-language support** (Python, Node.js, Rust, Go)
+- 🎯 **Multi-language support** (Python, Node.js, Rust, Go, Java, .NET)
 - 📦 **Evidence pack exports** for audit trails and fine-tuning
 - 🚫 **Patch hygiene gates** to prevent dangerous changes
+- 💾 **Docker volume caching** for faster dependency installs
 
 ---
 
@@ -80,7 +81,7 @@ RFSN Sandbox Controller is an intelligent automated bug-fixing system designed f
 ### Prerequisites
 
 - Python 3.9 or higher
-- Gemini API key ([Get one here](https://ai.google.dev/))
+- DeepSeek API key ([Get one here](https://platform.deepseek.com/)) or Gemini API key ([Get one here](https://ai.google.dev/))
 
 ### Setup
 
@@ -98,7 +99,7 @@ pip install -r requirements.txt
 
 # Configure API key
 cp .env.example .env
-# Edit .env and add your GEMINI_API_KEY
+# Edit .env and add your DEEPSEEK_API_KEY or GEMINI_API_KEY
 ```
 
 ### Docker Setup (Recommended for Production)
@@ -123,24 +124,25 @@ docker-compose run quixbugs
 
 ## Usage
 
-### Basic Command
+### Basic Command (Auto-detects test command)
 
 ```bash
 python -m rfsn_controller.cli \
   --repo "https://github.com/OWNER/REPO" \
-  --test "pytest -q tests/test_file.py" \
   --steps 12
 ```
+
+**Note**: The controller auto-detects the appropriate test command based on the project type (Python, Node.js, etc.). Only use `--test` if you need to override the auto-detected command.
 
 ### Options
 
 | Option | Description | Default |
 |--------|-------------|---------|
 | `--repo` | Public GitHub repository URL | Required |
-| `--test` | Test command to run | Required |
+| `--test` | Test command to run (auto-detected if omitted) | Auto-detect |
 | `--steps` | Maximum repair iterations | 12 |
 | `--ref` | Git branch or commit to checkout | `None` |
-| `--model` | Gemini model to use | `gemini-2.0-flash-exp` |
+| `--model` | Model to use (deepseek-chat, gemini-3.0-flash-exp) | `deepseek-chat` |
 | `--fix-all` | Continue until all tests pass | `False` |
 | `--max-steps-without-progress` | Early termination threshold | 10 |
 | `--collect-finetuning-data` | Export evidence packs | `False` |
@@ -149,34 +151,35 @@ python -m rfsn_controller.cli \
 
 | Variable | Description | Required |
 |----------|-------------|----------|
-| `GEMINI_API_KEY` | Google Gemini API key | Yes |
-| `GEMINI_MODEL` | Default model (can be overridden by --model) | No |
+| `DEEPSEEK_API_KEY` | DeepSeek API key | Yes (for DeepSeek) |
+| `GEMINI_API_KEY` | Google Gemini API key | Yes (for Gemini) |
+| `RFSN_MODEL` | Default model (can be overridden by --model) | No |
 
-### Example: Fix QuixBugs Bug
-
-```bash
-python -m rfsn_controller.cli \
-  --repo "https://github.com/jkoppel/QuixBugs" \
-  --test "pytest -q python_testcases/test_quicksort.py"
-```
-
-### Example: Fix All Bugs in Repository
+### Example: Fix Node.js Repository
 
 ```bash
 python -m rfsn_controller.cli \
-  --repo "https://github.com/OWNER/REPO" \
-  --test "pytest -q" \
+  --repo "https://github.com/BugSwarm/bugswarm" \
   --fix-all \
   --collect-finetuning-data
 ```
 
-### Example: Use Different Model
+### Example: Fix Python Repository with Custom Test
 
 ```bash
 python -m rfsn_controller.cli \
   --repo "https://github.com/OWNER/REPO" \
-  --test "pytest -q" \
-  --model "gemini-2.5-pro"
+  --test "pytest -q tests/test_file.py" \
+  --steps 12
+```
+
+### Example: Use Gemini Instead of DeepSeek
+
+```bash
+python -m rfsn_controller.cli \
+  --repo "https://github.com/OWNER/REPO" \
+  --model "gemini-3.0-flash-exp" \
+  --fix-all
 ```
 
 ### Docker Usage
@@ -372,10 +375,11 @@ When a QuixBugs repository is detected, the controller:
 
 ### Model Settings
 
-- **Model**: `gemini-2.0-flash`
+- **Default Model**: `deepseek-chat` (also supports `gemini-3.0-flash-exp`)
 - **Temperatures**: `[0.0, 0.2, 0.4]` (3 parallel evaluations)
-- **Timeout**: 90s (focus test), 180s (full test)
+- **Timeout**: 120s (focus test), 300s (full test)
 - **Max Steps**: 12 (configurable)
+- **Docker Caching**: Enabled for npm, yarn, pnpm, and pip caches
 
 ---
 
