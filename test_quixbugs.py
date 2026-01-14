@@ -3,13 +3,12 @@
 import sys
 sys.path.insert(0, "/Users/dawsonblock/Desktop/rfsn-sandbox-controller")
 
-from rfsn_controller.sandbox import Sandbox, create_sandbox, clone_public_github
-from rfsn_controller.verifier import run_tests, VerifyResult
-from rfsn_controller.controller import _collect_relevant_files_quixbugs, _safe_path
-from rfsn_controller.parsers import normalize_test_path
+from rfsn_controller.sandbox import create_sandbox, clone_public_github
+from rfsn_controller.verifier import run_tests
+from rfsn_controller.controller import _collect_relevant_files_quixbugs
 
 
-def test_quixbugs_file_collection():
+def _run_quixbugs_file_collection() -> bool:
     """Test that QuixBugs file collection works correctly."""
     # Create a test sandbox
     sb = create_sandbox()
@@ -46,7 +45,8 @@ def test_quixbugs_file_collection():
     print(f"Collected {len(files)} files:")
     for f in files:
         path = f.get("path", "unknown")
-        text_len = len(f.get("text", ""))
+        content = f.get("content") if isinstance(f.get("content"), str) else f.get("text", "")
+        text_len = len(content)
         print(f"  - {path} ({text_len} chars)")
 
     # Verify we got the expected files
@@ -68,6 +68,10 @@ def test_quixbugs_file_collection():
     return success
 
 
+def test_quixbugs_file_collection():
+    assert _run_quixbugs_file_collection()
+
+
 if __name__ == "__main__":
-    success = test_quixbugs_file_collection()
+    success = _run_quixbugs_file_collection()
     sys.exit(0 if success else 1)

@@ -7,8 +7,10 @@ appropriate test commands. Handles edge cases like pytest exit code 2
 
 import re
 from dataclasses import dataclass
-from typing import Optional, List, Dict, Any
+from typing import Optional, Dict, Any
 from enum import Enum
+
+__test__ = False
 
 
 class TestFramework(Enum):
@@ -421,3 +423,8 @@ class TestDetector:
             confidence=0.5,
             metadata={"fallback": True},
         )
+
+
+TestFramework.__test__ = False
+TestDetectionResult.__test__ = False
+TestDetector.__test__ = False

@@ -1,15 +1,18 @@
 """Test QuixBugs file collection heuristics directly."""
 
-import os
 import sys
+
+# Import only what we need, avoiding llm_gemini
+from rfsn_controller.sandbox import (
+    create_sandbox,
+    clone_public_github,
+    read_file,
+)
+from rfsn_controller.verifier import run_tests
+from rfsn_controller.parsers import normalize_test_path, parse_trace_files
 
 # Add the package path
 sys.path.insert(0, "/Users/dawsonblock/Desktop/rfsn-sandbox-controller")
-
-# Import only what we need, avoiding llm_gemini
-from rfsn_controller.sandbox import Sandbox, create_sandbox, clone_public_github, list_tree, read_file
-from rfsn_controller.verifier import run_tests
-from rfsn_controller.parsers import normalize_test_path, parse_trace_files
 
 
 def _safe_path(p: str) -> bool:
@@ -56,7 +59,7 @@ def _collect_relevant_files_quixbugs(sb, v, repo_tree: str):
     return out
 
 
-def test_quixbugs_file_collection():
+def _run_quixbugs_file_collection() -> bool:
     """Test that QuixBugs file collection works correctly."""
     print("Creating sandbox...")
     sb = create_sandbox()
@@ -90,7 +93,8 @@ def test_quixbugs_file_collection():
     print(f"Collected {len(files)} files:")
     for f in files:
         path = f.get("path", "unknown")
-        text_len = len(f.get("text", ""))
+        content = f.get("content") if isinstance(f.get("content"), str) else f.get("text", "")
+        text_len = len(content)
         print(f"  - {path} ({text_len} chars)")
 
     expected_files = [
@@ -113,6 +117,10 @@ def test_quixbugs_file_collection():
     return success
 
 
+def test_quixbugs_file_collection():
+    assert _run_quixbugs_file_collection()
+
+
 if __name__ == "__main__":
-    success = test_quixbugs_file_collection()
+    success = _run_quixbugs_file_collection()
     sys.exit(0 if success else 1)
