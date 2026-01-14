@@ -12,9 +12,10 @@ Exports comprehensive artifacts from controller runs including:
 import json
 import os
 import shutil
-from datetime import datetime
 from typing import Dict, Any, Optional, List
 from dataclasses import dataclass
+
+from .clock import Clock, SystemClock, make_run_id
 
 
 @dataclass
@@ -32,13 +33,16 @@ class EvidencePackExporter:
     def __init__(self, config: Optional[EvidencePackConfig] = None):
         self.config = config or EvidencePackConfig()
 
-    def create_run_id(self) -> str:
+    def create_run_id(
+        self,
+        *,
+        clock: Optional[Clock] = None,
+        seed_material: Optional[Dict[str, Any]] = None,
+    ) -> str:
         """Generate a unique run ID based on timestamp."""
-        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        # Add a short hash for uniqueness
-        import hashlib
-        hash_suffix = hashlib.sha256(timestamp.encode()).hexdigest()[:8]
-        return f"run_{timestamp}_{hash_suffix}"
+        if clock is None:
+            clock = SystemClock()
+        return make_run_id(clock=clock, seed_material=seed_material or {})
 
     def export(
         self,

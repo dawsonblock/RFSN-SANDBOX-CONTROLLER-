@@ -265,7 +265,12 @@ class ServiceTemplates:
 class DockerComposeManager:
     """Manages Docker Compose services for testing."""
 
-    def __init__(self, work_dir: str, project_name: str = "rfsn-test"):
+    def __init__(
+        self,
+        work_dir: str,
+        project_name: str = "rfsn-test",
+        time_mode: str = "live",
+    ):
         """Initialize the Docker Compose manager.
 
         Args:
@@ -274,6 +279,7 @@ class DockerComposeManager:
         """
         self.work_dir = work_dir
         self.project_name = project_name
+        self.time_mode = time_mode
         self.compose_file = os.path.join(work_dir, "docker-compose.yml")
         self.services: List[ServiceConfig] = []
         self._running = False
@@ -600,6 +606,8 @@ class DockerComposeManager:
         Returns:
             Result dictionary with status.
         """
+        if (self.time_mode or "").lower() != "live":
+            raise RuntimeError("wait_for_healthy requires time_mode='live' (uses wall-clock sleep)")
         poll_interval_sec = 2
         max_attempts = max(1, int(timeout // poll_interval_sec))
 

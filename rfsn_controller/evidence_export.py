@@ -6,12 +6,12 @@ Exports winning diffs and evidence packs for:
 - Audit trails
 """
 
-import os
 import json
 import hashlib
-from datetime import datetime
 from typing import Dict, Any, Optional, List
 from dataclasses import dataclass, asdict
+
+from .clock import Clock, SystemClock, make_run_id
 
 
 @dataclass
@@ -43,11 +43,15 @@ class EvidencePack:
     tool_requests: List[Dict[str, Any]]
 
 
-def generate_run_id() -> str:
+def generate_run_id(
+    *,
+    clock: Optional[Clock] = None,
+    seed_material: Optional[Dict[str, Any]] = None,
+) -> str:
     """Generate a unique run ID."""
-    timestamp = datetime.utcnow().strftime("%Y%m%d_%H%M%S")
-    random_hash = hashlib.md5(os.urandom(8)).hexdigest()[:8]
-    return f"run_{timestamp}_{random_hash}"
+    if clock is None:
+        clock = SystemClock()
+    return make_run_id(clock=clock, seed_material=seed_material or {})
 
 
 def compute_diff_hash(diff: str) -> str:
@@ -147,6 +151,7 @@ def create_evidence_pack(
     passing_tests_after: int,
     steps_taken: int,
     model_used: str,
+    clock: Optional[Clock] = None,
 ) -> EvidencePack:
     """Create a complete evidence pack.
 
@@ -169,9 +174,11 @@ def create_evidence_pack(
     Returns:
         Complete EvidencePack.
     """
+    if clock is None:
+        clock = SystemClock()
     metadata = WinnerMetadata(
         run_id=run_id,
-        timestamp=datetime.utcnow().isoformat(),
+        timestamp=clock.now_utc().isoformat(),
         repo_url=repo_url,
         diff_hash=compute_diff_hash(diff),
         files_changed=files_changed,

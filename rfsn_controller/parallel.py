@@ -48,7 +48,7 @@ def _evaluate_single_patch(
     """
     wt = None
     try:
-        wt = make_worktree(sb)
+        wt = make_worktree(sb, suffix=diff_hash[:10])
         ap = apply_patch_in_dir(wt, diff)
         if not ap.get("ok"):
             return PatchResult(

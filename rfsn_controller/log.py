@@ -2,7 +2,6 @@
 
 import json
 import os
-import time
 from typing import Any, Dict, Optional
 
 from .clock import Clock
@@ -33,7 +32,7 @@ def write_jsonl(
     elif clock is not None:
         entry["ts"] = float(clock.time())
     else:
-        entry["ts"] = time.time()
+        raise ValueError("write_jsonl requires either ts or clock")
     path = os.path.join(log_dir, "run.jsonl")
     with open(path, "a", encoding="utf-8") as f:
         f.write(json.dumps(entry, ensure_ascii=False) + "\n")

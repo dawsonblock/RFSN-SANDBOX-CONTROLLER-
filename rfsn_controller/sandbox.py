@@ -12,7 +12,8 @@ import os
 import shutil
 import subprocess
 import tempfile
-import uuid
+import threading
+from itertools import count
 from dataclasses import dataclass
 from typing import Dict, Any, Tuple, List, Optional
 import shlex
@@ -36,6 +37,11 @@ class Sandbox:
 
     root: str  # root directory of the sandbox
     repo_dir: str  # path to the cloned repository within the sandbox
+    worktree_counter: int = 0
+
+
+_SANDBOX_COUNTER = count(1)
+_WORKTREE_COUNTER_LOCK = threading.Lock()
 
 
 def _run(cmd: str, cwd: str, timeout_sec: int = 120) -> Tuple[int, str, str]:
@@ -81,8 +87,8 @@ def create_sandbox(*, run_id: Optional[str] = None) -> Sandbox:
     if run_id:
         root = os.path.join(tempfile.gettempdir(), f"rfsn_sb_{run_id}")
     else:
-        suffix = uuid.uuid4().hex[:10]
-        root = os.path.join(tempfile.gettempdir(), f"rfsn_sb_{suffix}")
+        suffix = next(_SANDBOX_COUNTER)
+        root = os.path.join(tempfile.gettempdir(), f"rfsn_sb_{suffix:06d}")
     os.makedirs(root, exist_ok=True)
     repo_dir = os.path.join(root, "repo")
     return Sandbox(root=root, repo_dir=repo_dir)
@@ -446,9 +452,12 @@ def apply_patch(sb: Sandbox, diff: str) -> Dict[str, Any]:
     }
 
 
-def make_worktree(sb: Sandbox) -> str:
+def make_worktree(sb: Sandbox, *, suffix: Optional[str] = None) -> str:
     """Create a detached worktree for testing candidate patches."""
-    suffix = uuid.uuid4().hex[:10]
+    if suffix is None:
+        with _WORKTREE_COUNTER_LOCK:
+            sb.worktree_counter += 1
+            suffix = f"{sb.worktree_counter:06d}"
     wt = os.path.join(sb.root, f"wt_{suffix}")
     # Escape path for shell safety
     wt_escaped = shlex.quote(wt)
