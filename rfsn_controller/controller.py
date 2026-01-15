@@ -353,6 +353,9 @@ class ControllerConfig:
     run_started_at_utc: Optional[str] = None
     time_seed: Optional[int] = None
     rng_seed: Optional[int] = None
+    feature_mode: bool = False
+    feature_description: Optional[str] = None
+    acceptance_criteria: List[str] = field(default_factory=list)
 
 
 def run_controller(cfg: ControllerConfig) -> Dict[str, Any]:
@@ -1050,19 +1053,39 @@ def run_controller(cfg: ControllerConfig) -> Dict[str, Any]:
                 })
 
             # model state = facts
-            state = {
-                "goal": "Make test command succeed (exit code 0).",
-                "intent": pd.intent,
-                "subgoal": pd.subgoal,
-                "test_cmd": effective_test_cmd,
-                "focus_test_cmd": pd.focus_test_cmd,
-                "failure_output": (v.stdout or "") + "\n" + (v.stderr or ""),
-                "repo_tree": repo_tree_text,
-                "constraints": _constraints_text(),
-                "files_block": files_block,
-                "action_priors": action_priors_text,
-                "observations": observations,
-            }
+            if cfg.feature_mode:
+                # Feature mode state
+                state = {
+                    "mode": "feature",
+                    "goal": f"Implement feature: {cfg.feature_description or 'As specified'}",
+                    "feature_description": cfg.feature_description or "",
+                    "acceptance_criteria": cfg.acceptance_criteria or [],
+                    "completed_subgoals": [],  # Track completed subgoals
+                    "current_subgoal": "scaffold: Create necessary file structure and boilerplate",
+                    "test_cmd": effective_test_cmd,
+                    "focus_test_cmd": pd.focus_test_cmd,
+                    "failure_output": (v.stdout or "") + "\n" + (v.stderr or ""),
+                    "repo_tree": repo_tree_text,
+                    "constraints": _constraints_text(),
+                    "files_block": files_block,
+                    "action_priors": action_priors_text,
+                    "observations": observations,
+                }
+            else:
+                # Repair mode state (original)
+                state = {
+                    "goal": "Make test command succeed (exit code 0).",
+                    "intent": pd.intent,
+                    "subgoal": pd.subgoal,
+                    "test_cmd": effective_test_cmd,
+                    "focus_test_cmd": pd.focus_test_cmd,
+                    "failure_output": (v.stdout or "") + "\n" + (v.stderr or ""),
+                    "repo_tree": repo_tree_text,
+                    "constraints": _constraints_text(),
+                    "files_block": files_block,
+                    "action_priors": action_priors_text,
+                    "observations": observations,
+                }
             model_input = build_model_input(state)
 
             # ask model (try multiple temps for diversity)
@@ -1180,6 +1203,46 @@ def run_controller(cfg: ControllerConfig) -> Dict[str, Any]:
                             continue
                         bad_hashes.add(dh)
                         patches_to_evaluate.append((diff, t))
+
+                elif mode == "feature_summary":
+                    # Feature mode completion
+                    summary = resp.get("summary", "")
+                    completion_status = resp.get("completion_status", "")
+                    
+                    print(f"\n[Step {step}] Feature summary received:")
+                    print(f"Status: {completion_status}")
+                    print(f"Summary: {summary[:200]}...")
+                    
+                    log({
+                        "phase": "feature_summary",
+                        "step": step,
+                        "completion_status": completion_status,
+                        "summary": summary,
+                    })
+                    
+                    if completion_status == "complete":
+                        print(f"\n✅ FEATURE COMPLETE after {step} steps")
+                        current_phase = Phase.FINAL_VERIFY
+                        return {
+                            "ok": True,
+                            "sandbox": sb.root,
+                            "repo_dir": sb.repo_dir,
+                            "steps_taken": step,
+                            "phase": "feature_complete",
+                            "summary": summary,
+                            "completion_status": completion_status,
+                        }
+                    elif completion_status == "blocked":
+                        bailout_reason = f"Feature blocked: {summary[:100]}"
+                        print(f"\n❌ Early termination: {bailout_reason}")
+                        log({
+                            "phase": "bailout",
+                            "step": step,
+                            "reason": bailout_reason,
+                        })
+                        current_phase = Phase.BAILOUT
+                        break
+                    # For "partial" or "in_progress", continue iteration
 
             if current_phase == Phase.BAILOUT:
                 break

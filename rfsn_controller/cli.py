@@ -242,6 +242,21 @@ def main() -> None:
         default=20000,
         help="Maximum number of learning rows to retain (default: 20000)",
     )
+    parser.add_argument(
+        "--feature-mode",
+        action="store_true",
+        help="Enable feature engineering mode (vs repair mode)",
+    )
+    parser.add_argument(
+        "--feature-description",
+        default=None,
+        help="Feature specification for feature mode",
+    )
+    parser.add_argument(
+        "--acceptance-criteria",
+        action="append",
+        help="Acceptance criteria for feature mode (can be specified multiple times)",
+    )
     args = parser.parse_args()
 
     cfg = ControllerConfig(
@@ -282,6 +297,9 @@ def main() -> None:
         learning_half_life_days=args.learning_half_life_days,
         learning_max_age_days=args.learning_max_age_days,
         learning_max_rows=args.learning_max_rows,
+        feature_mode=args.feature_mode,
+        feature_description=args.feature_description,
+        acceptance_criteria=args.acceptance_criteria or [],
     )
     result = run_controller(cfg)
     print(result)

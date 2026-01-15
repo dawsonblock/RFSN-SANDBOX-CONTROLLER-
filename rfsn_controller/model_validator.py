@@ -16,10 +16,12 @@ from dataclasses import dataclass
 class ModelOutput:
     """Validated model output."""
 
-    mode: str  # "tool_request" or "patch"
+    mode: str  # "tool_request", "patch", or "feature_summary"
     requests: Optional[list[Dict[str, Any]]] = None
     diff: Optional[str] = None
     why: Optional[str] = None
+    summary: Optional[str] = None
+    completion_status: Optional[str] = None
     is_valid: bool = True
     validation_error: Optional[str] = None
 
@@ -83,6 +85,8 @@ class ModelOutputValidator:
             return self._validate_tool_request(data)
         elif mode == "patch":
             return self._validate_patch(data)
+        elif mode == "feature_summary":
+            return self._validate_feature_summary(data)
         else:
             return ModelOutput(
                 mode="tool_request",
@@ -183,6 +187,43 @@ class ModelOutputValidator:
         return ModelOutput(
             mode="patch",
             diff=diff,
+            is_valid=True,
+        )
+
+    def _validate_feature_summary(self, data: Dict[str, Any]) -> ModelOutput:
+        """Validate feature_summary mode output.
+
+        Args:
+            data: Parsed JSON data.
+
+        Returns:
+            ModelOutput with validation results.
+        """
+        summary = data.get("summary", "")
+        completion_status = data.get("completion_status", "")
+
+        if not summary or not summary.strip():
+            return ModelOutput(
+                mode="tool_request",
+                requests=[{"tool": "sandbox.read_file", "args": {"path": "README.md"}}],
+                why="Requesting clarification due to empty summary",
+                is_valid=False,
+                validation_error="summary cannot be empty",
+            )
+
+        if completion_status not in ["complete", "partial", "blocked", "in_progress"]:
+            return ModelOutput(
+                mode="tool_request",
+                requests=[{"tool": "sandbox.read_file", "args": {"path": "README.md"}}],
+                why="Requesting clarification due to invalid completion_status",
+                is_valid=False,
+                validation_error=f"Invalid completion_status: {completion_status}",
+            )
+
+        return ModelOutput(
+            mode="feature_summary",
+            summary=summary,
+            completion_status=completion_status,
             is_valid=True,
         )
 
