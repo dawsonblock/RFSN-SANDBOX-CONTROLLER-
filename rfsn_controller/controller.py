@@ -1060,18 +1060,26 @@ def run_controller(cfg: ControllerConfig) -> Dict[str, Any]:
 
             # model state = facts
             if cfg.feature_mode:
-                # Feature mode state
+                # Feature mode state - validate feature configuration
+                if not cfg.feature_description:
+                    print("[WARNING] Feature mode enabled but no feature description provided")
+                
+                if not cfg.acceptance_criteria:
+                    print("[WARNING] Feature mode enabled but no acceptance criteria provided")
+                
+                # Optimize: compute subgoal once
                 current_subgoal = (
                     feature_subgoals[current_feature_subgoal_idx] 
                     if current_feature_subgoal_idx < len(feature_subgoals) 
                     else "finalize: Review and complete feature"
                 )
+                
                 state = {
                     "mode": MODE_FEATURE,
                     "goal": f"Implement feature: {cfg.feature_description or 'As specified'}",
                     "feature_description": cfg.feature_description or "",
                     "acceptance_criteria": cfg.acceptance_criteria or [],
-                    "completed_subgoals": completed_feature_subgoals,
+                    "completed_subgoals": completed_feature_subgoals.copy(),  # Defensive copy
                     "current_subgoal": current_subgoal,
                     "test_cmd": effective_test_cmd,
                     "focus_test_cmd": pd.focus_test_cmd,

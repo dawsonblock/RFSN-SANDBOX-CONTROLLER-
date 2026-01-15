@@ -1,16 +1,27 @@
 """Helpers for constructing model input strings."""
 
-from typing import Dict, Any
+from typing import Dict, Any, Optional
 
 # Mode constants
 MODE_FEATURE = "feature"
 
 
-def _truncate(s: str, n: int) -> str:
-    """Truncate a string to at most n characters, appending a marker if truncated."""
+def _truncate(s: Optional[str], n: int) -> str:
+    """Truncate a string to at most n characters, appending a marker if truncated.
+    
+    Args:
+        s: String to truncate, can be None
+        n: Maximum length
+        
+    Returns:
+        Truncated string or empty string if input is None
+    """
     if not s:
         return ""
-    return s if len(s) <= n else s[:n] + "\n...[truncated]..."
+    # Optimize: avoid string concatenation if not needed
+    if len(s) <= n:
+        return s
+    return s[:n] + "\n...[truncated]..."
 
 
 def build_model_input(state: Dict[str, Any]) -> str:
@@ -27,25 +38,38 @@ def build_model_input(state: Dict[str, Any]) -> str:
 
     Returns:
         A single string with sections separated by headers.
+        
+    Raises:
+        KeyError: If required state keys are missing
     """
+    # Validate required keys
+    required_keys = ['goal', 'test_cmd', 'focus_test_cmd', 'failure_output', 
+                     'repo_tree', 'constraints', 'files_block']
+    missing_keys = [k for k in required_keys if k not in state]
+    if missing_keys:
+        raise KeyError(f"Missing required state keys: {missing_keys}")
+    
     # Check if this is feature mode
     is_feature_mode = state.get('mode') == MODE_FEATURE
     
-    sections = [
-        f"GOAL:\n{state['goal']}\n\n",
-    ]
+    # Use list for efficient string building
+    sections = [f"GOAL:\n{state['goal']}\n\n"]
     
     if is_feature_mode:
         # Feature mode sections
-        sections.append(f"FEATURE_DESCRIPTION:\n{state.get('feature_description', '')}\n\n")
+        feature_desc = state.get('feature_description', '')
+        if feature_desc:
+            sections.append(f"FEATURE_DESCRIPTION:\n{feature_desc}\n\n")
         
         acceptance_criteria = state.get('acceptance_criteria', [])
         if acceptance_criteria:
+            # Optimize: use join instead of repeated concatenation
             criteria_text = "\n".join(f"  - {c}" for c in acceptance_criteria)
             sections.append(f"ACCEPTANCE_CRITERIA:\n{criteria_text}\n\n")
         
         completed_subgoals = state.get('completed_subgoals', [])
         if completed_subgoals:
+            # Optimize: use join instead of repeated concatenation
             completed_text = "\n".join(f"  ✓ {s}" for s in completed_subgoals)
             sections.append(f"COMPLETED_SUBGOALS:\n{completed_text}\n\n")
         
@@ -54,11 +78,15 @@ def build_model_input(state: Dict[str, Any]) -> str:
             sections.append(f"CURRENT_SUBGOAL:\n{current_subgoal}\n\n")
     else:
         # Repair mode sections (original behavior)
+        # Validate repair mode required keys
+        if 'intent' not in state or 'subgoal' not in state:
+            raise KeyError("Repair mode requires 'intent' and 'subgoal' keys")
         sections.extend([
             f"INTENT:\n{state['intent']}\n\n",
             f"SUBGOAL:\n{state['subgoal']}\n\n",
         ])
     
+    # Add common sections
     sections.extend([
         f"TEST_COMMAND:\n{state['test_cmd']}\n\n",
         f"FOCUS_TEST_COMMAND:\n{state['focus_test_cmd']}\n\n",
@@ -68,13 +96,14 @@ def build_model_input(state: Dict[str, Any]) -> str:
         f"FILES:\n{state['files_block']}\n",
     ])
 
-    if state.get('action_priors'):
-        sections.append(
-            f"\nACTION_PRIORS:\n{_truncate(state['action_priors'], 12000)}\n"
-        )
+    # Add optional sections
+    action_priors = state.get('action_priors')
+    if action_priors:
+        sections.append(f"\nACTION_PRIORS:\n{_truncate(action_priors, 12000)}\n")
     
-    # Add observations if present
-    if state.get('observations'):
-        sections.append(f"\nOBSERVATIONS:\n{_truncate(state['observations'], 30000)}")
+    observations = state.get('observations')
+    if observations:
+        sections.append(f"\nOBSERVATIONS:\n{_truncate(observations, 30000)}")
     
+    # Use join for efficient string concatenation
     return "".join(sections)

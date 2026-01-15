@@ -24,6 +24,15 @@ class ModelOutput:
     completion_status: Optional[str] = None
     is_valid: bool = True
     validation_error: Optional[str] = None
+    
+    def __post_init__(self):
+        """Validate output consistency after initialization."""
+        if self.mode == "tool_request" and not self.requests:
+            raise ValueError("tool_request mode requires requests")
+        if self.mode == "patch" and not self.diff:
+            raise ValueError("patch mode requires diff")
+        if self.mode == "feature_summary" and not self.summary:
+            raise ValueError("feature_summary mode requires summary")
 
 
 class ModelOutputValidator:
@@ -202,6 +211,7 @@ class ModelOutputValidator:
         summary = data.get("summary", "")
         completion_status = data.get("completion_status", "")
 
+        # Validate summary content
         if not summary or not summary.strip():
             return ModelOutput(
                 mode="tool_request",
@@ -210,14 +220,26 @@ class ModelOutputValidator:
                 is_valid=False,
                 validation_error="summary cannot be empty",
             )
+        
+        # Validate summary length (should be meaningful)
+        if len(summary.strip()) < 20:
+            return ModelOutput(
+                mode="tool_request",
+                requests=[{"tool": "sandbox.read_file", "args": {"path": "README.md"}}],
+                why="Requesting clarification due to too short summary",
+                is_valid=False,
+                validation_error="summary must be at least 20 characters",
+            )
 
-        if completion_status not in ["complete", "partial", "blocked", "in_progress"]:
+        # Validate completion status
+        valid_statuses = ["complete", "partial", "blocked", "in_progress"]
+        if completion_status not in valid_statuses:
             return ModelOutput(
                 mode="tool_request",
                 requests=[{"tool": "sandbox.read_file", "args": {"path": "README.md"}}],
                 why="Requesting clarification due to invalid completion_status",
                 is_valid=False,
-                validation_error=f"Invalid completion_status: {completion_status}",
+                validation_error=f"Invalid completion_status: {completion_status}. Must be one of {valid_statuses}",
             )
 
         return ModelOutput(

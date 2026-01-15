@@ -51,9 +51,27 @@ class FeatureGoal:
     timeout: int = 600
 
     def __post_init__(self):
-        """Initialize default subgoals if not provided."""
+        """Initialize default subgoals if not provided and validate inputs."""
+        # Validate description
+        if not self.description or not self.description.strip():
+            raise ValueError("Feature description cannot be empty")
+        
+        # Validate acceptance criteria
+        if not self.acceptance_criteria:
+            raise ValueError("At least one acceptance criterion is required")
+        
+        # Remove empty criteria
+        self.acceptance_criteria = [c for c in self.acceptance_criteria if c and c.strip()]
+        if not self.acceptance_criteria:
+            raise ValueError("All acceptance criteria are empty")
+        
+        # Set default subgoals if not provided
         if self.subgoals is None:
-            self.subgoals = DEFAULT_FEATURE_SUBGOALS
+            self.subgoals = list(DEFAULT_FEATURE_SUBGOALS)  # Create a copy
+        
+        # Validate timeout
+        if self.timeout <= 0:
+            raise ValueError("Timeout must be positive")
 
 
 class GoalFactory:
