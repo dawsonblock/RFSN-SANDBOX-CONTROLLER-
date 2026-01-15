@@ -222,6 +222,10 @@ def validate_patch_hygiene(
                 violations.append(f"Cannot modify files in {forbidden_dir}: {filepath}")
     
     # Define lockfile patterns
+    # Note: This includes both explicit well-known lockfiles and any file ending in .lock
+    # This intentionally covers custom lockfiles (e.g., custom-name.lock) to prevent
+    # unintended dependency changes. If a .lock file should be modifiable, it should not
+    # be named with the .lock extension.
     lockfile_patterns = {
         'package-lock.json',
         'yarn.lock',
@@ -237,7 +241,7 @@ def validate_patch_hygiene(
     for filepath in files_changed:
         filename = filepath.split('/')[-1]
         
-        # Check if this is a lockfile
+        # Check if this is a lockfile (explicit patterns OR any .lock file)
         is_lockfile = filename in lockfile_patterns or filename.endswith('.lock')
         
         # If lockfile changes are allowed, skip lockfile pattern checks

@@ -211,5 +211,86 @@ class TestHygieneProfiles:
         assert 'node_modules/' in feature.forbidden_dirs
 
 
-# Integration tests would go here but are not included as they require
-# running the full controller loop which is expensive
+class TestIntegration:
+    """Integration tests for policy enforcement."""
+    
+    def test_allowlist_enforced_in_sandbox_run(self):
+        """Test that sandbox _run enforces allowed_commands."""
+        from rfsn_controller.sandbox import _run
+        from rfsn_controller.allowlist_profiles import commands_for_language
+        
+        # Get Python allowlist (should not include cargo)
+        python_cmds = commands_for_language("python")
+        
+        # Try to run a blocked command with Python allowlist
+        exit_code, stdout, stderr = _run(
+            "cargo test",
+            cwd="/tmp",
+            timeout_sec=1,
+            allowed_commands=python_cmds
+        )
+        
+        # Should be blocked
+        assert exit_code != 0
+        assert "not allowed" in stderr.lower()
+        
+        # Try to run an allowed command
+        exit_code, stdout, stderr = _run(
+            "python --version",
+            cwd="/tmp",
+            timeout_sec=5,
+            allowed_commands=python_cmds
+        )
+        
+        # Should succeed (or fail for legitimate reasons, not blocking)
+        # If python is not installed, it will fail with "not in allowlist" first
+        # so we check it's not blocked by allowlist
+        if exit_code != 0:
+            assert "not allowed" not in stderr.lower() or "Command 'python' is not allowed" not in stderr
+    
+    def test_hygiene_policy_selection_by_mode(self):
+        """Test that hygiene policy is correctly selected based on mode."""
+        # This tests the logic without running full controller
+        repair_policy = PatchHygieneConfig.for_repair_mode(language="python")
+        feature_policy = PatchHygieneConfig.for_feature_mode(language="python")
+        
+        # Verify repair is stricter
+        assert repair_policy.max_lines_changed < feature_policy.max_lines_changed
+        assert repair_policy.max_files_changed < feature_policy.max_files_changed
+        assert not repair_policy.allow_test_modification
+        assert feature_policy.allow_test_modification
+        
+        # Test language adjustment for Java in feature mode
+        java_feature = PatchHygieneConfig.for_feature_mode(language="java")
+        assert java_feature.max_lines_changed == 700  # 500 + 200
+        
+    def test_lockfile_detection_includes_custom_lock_files(self):
+        """Test that .lock files are treated as lockfiles even if not in explicit list."""
+        from rfsn_controller.patch_hygiene import validate_patch_hygiene
+        
+        # Create a patch that modifies a custom .lock file
+        diff = """--- a/custom-deps.lock
++++ b/custom-deps.lock
+@@ -1,1 +1,1 @@
+-old-version
++new-version
+"""
+        
+        # With allow_lockfile_changes=False, should be rejected
+        config = PatchHygieneConfig(
+            max_lines_changed=1000,
+            max_files_changed=10,
+            allow_lockfile_changes=False,
+        )
+        result = validate_patch_hygiene(diff, config)
+        assert not result.is_valid
+        assert any("Cannot modify file" in v or "*.lock" in v for v in result.violations)
+        
+        # With allow_lockfile_changes=True, should be allowed
+        config_allow = PatchHygieneConfig(
+            max_lines_changed=1000,
+            max_files_changed=10,
+            allow_lockfile_changes=True,
+        )
+        result_allow = validate_patch_hygiene(diff, config_allow)
+        assert result_allow.is_valid
