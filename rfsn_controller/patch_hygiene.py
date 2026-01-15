@@ -23,12 +23,48 @@ class PatchHygieneConfig:
         forbidden_dirs: Optional[Set[str]] = None,
         forbidden_file_patterns: Optional[Set[str]] = None,
         allow_test_deletion: bool = False,
+        allow_test_modification: bool = False,
     ):
         self.max_lines_changed = max_lines_changed
         self.max_files_changed = max_files_changed
         self.forbidden_dirs = forbidden_dirs or self._default_forbidden_dirs()
         self.forbidden_file_patterns = forbidden_file_patterns or self._default_forbidden_patterns()
         self.allow_test_deletion = allow_test_deletion
+        self.allow_test_modification = allow_test_modification
+    
+    @classmethod
+    def for_repair_mode(cls) -> 'PatchHygieneConfig':
+        """Create a strict configuration for repair mode.
+        
+        Repair mode requires minimal changes to fix bugs:
+        - Max 200 lines changed
+        - Max 5 files changed
+        - No test deletion
+        - No test modification
+        """
+        return cls(
+            max_lines_changed=200,
+            max_files_changed=5,
+            allow_test_deletion=False,
+            allow_test_modification=False,
+        )
+    
+    @classmethod
+    def for_feature_mode(cls) -> 'PatchHygieneConfig':
+        """Create a more permissive configuration for feature mode.
+        
+        Feature mode allows larger changes for feature implementation:
+        - Max 500 lines changed (allows scaffolding + implementation)
+        - Max 15 files changed (allows multi-module features)
+        - Allows test creation and modification
+        - No test deletion (tests are deliverables)
+        """
+        return cls(
+            max_lines_changed=500,
+            max_files_changed=15,
+            allow_test_deletion=False,
+            allow_test_modification=True,
+        )
     
     @staticmethod
     def _default_forbidden_dirs() -> Set[str]:
@@ -150,22 +186,29 @@ def validate_patch_hygiene(
                             violations.append(f"Cannot delete test file: {deleted_file}")
                         break
     
-    # Check for skip patterns in modified files
-    skip_patterns = [
-        r'@pytest\.mark\.skip',
-        r'@pytest\.mark\.xfail',
-        r'@unittest\.skip',
-        r'@unittest\.skipIf',
-        r'@unittest\.skipUnless',
-    ]
+    # Check for test modification (if not allowed)
+    if not config.allow_test_modification:
+        for filepath in files_changed:
+            if _is_test_file(filepath):
+                violations.append(f"Cannot modify test file in repair mode: {filepath}")
     
-    for filepath in files_changed:
-        if _is_test_file(filepath):
-            for pattern in skip_patterns:
-                if re.search(pattern, diff):
-                    violations.append(
-                        f"Test skip pattern detected in {filepath}: {pattern}"
-                    )
+    # Check for skip patterns in modified files (only if tests are being modified)
+    if config.allow_test_modification:
+        skip_patterns = [
+            r'@pytest\.mark\.skip',
+            r'@pytest\.mark\.xfail',
+            r'@unittest\.skip',
+            r'@unittest\.skipIf',
+            r'@unittest\.skipUnless',
+        ]
+        
+        for filepath in files_changed:
+            if _is_test_file(filepath):
+                for pattern in skip_patterns:
+                    if re.search(pattern, diff):
+                        violations.append(
+                            f"Test skip pattern detected in {filepath}: {pattern}"
+                        )
     
     # Check for debug prints
     debug_patterns = [

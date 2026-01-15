@@ -26,13 +26,13 @@ RFSN Sandbox Controller is an intelligent automated coding system designed for *
 It combines:
 
 - 🔧 **Docker-based isolation** for secure, reproducible repairs
-- 🛡️ **Strict security hardening** with command allowlisting and URL validation
+- 🛡️ **Strict security hardening** with multi-language command allowlisting and URL validation
 - 🧪 **Test-driven verification** as ground truth for fixes
 - 🤖 **DeepSeek R1** for intelligent patch generation (also supports Gemini)
 - ⚡ **Parallel patch evaluation** using isolated git worktrees
-- 🎯 **Multi-language support** (Python, Node.js, Rust, Go, Java, .NET)
+- 🎯 **Multi-language support** (Python, Node.js, Rust, Go, Java, .NET, Ruby)
 - 📦 **Evidence pack exports** for audit trails and fine-tuning
-- 🚫 **Patch hygiene gates** to prevent dangerous changes
+- 🚫 **Mode-aware patch hygiene gates** (strict for repair, flexible for features)
 - 💾 **Docker volume caching** for faster dependency installs
 
 ---
@@ -43,8 +43,10 @@ It combines:
 
 - **Docker Containerization**: Full isolation with non-root user and command allowlisting
 - **Strict GitHub URL Validation**: Regex enforcement for `OWNER/REPO` format only
-- **Command Allowlisting**: Blocks dangerous commands (`curl`, `wget`, `ssh`, `sudo`, etc.)
-- **Patch Hygiene Gates**: Limits patch size (200 lines, 5 files) and blocks dangerous paths
+- **Multi-Language Command Allowlisting**: Supports Python, Node.js, Rust, Go, Java, .NET, Ruby commands while blocking dangerous operations
+- **Mode-Aware Patch Hygiene Gates**: 
+  - **Repair Mode**: Strict limits (200 lines, 5 files, no test modification)
+  - **Feature Mode**: Flexible limits (500 lines, 15 files, allows test creation)
 - **Tool Request Quotas**: Prevents token waste (6 per response, 20 total per run)
 - **Request Deduplication**: MD5 signature-based duplicate detection
 
@@ -52,7 +54,7 @@ It combines:
 
 - **Parallel Patch Evaluation**: Tests 3 candidate patches simultaneously using `ThreadPoolExecutor`
 - **Isolated Worktree Testing**: Each patch evaluated in a separate git worktree
-- **Multi-Language Support**: Auto-detection for Python, Node.js, Rust, and Go projects
+- **Multi-Language Support**: Auto-detection and full support for Python, Node.js, Rust, Go, Java, .NET, and Ruby projects
 - **Evidence Pack Export**: Complete audit trails with diffs, test outputs, and metadata
 - **Runtime Model Selection**: Configurable LLM via CLI flag or environment variable
 - **Intelligent Policy Engine**: Regex-based error classification with confidence scoring
@@ -77,7 +79,23 @@ It combines:
 - **Context Extraction**: Extracts line numbers, file paths, and error messages from tracebacks
 - **Focus Test Selection**: Runs only the first failing test for faster feedback
 - **Intent Selection**: Chooses repair strategy based on error type
-- **Project Type Detection**: Automatically detects Python, Node.js, Rust, and Go projects
+- **Project Type Detection**: Automatically detects Python, Node.js, Rust, Go, Java, .NET, and Ruby projects
+
+### Multi-Language Support
+
+The controller supports a wide range of programming languages and build tools:
+
+| Language | Commands | Build/Test Tools |
+|----------|----------|------------------|
+| **Python** | `python`, `pip`, `pytest`, `pipenv`, `poetry` | `ruff`, `mypy`, `black`, `flake8`, `pylint` |
+| **Node.js** | `node`, `npm`, `yarn`, `pnpm`, `npx`, `bun` | `tsc`, `jest`, `mocha`, `eslint`, `prettier` |
+| **Rust** | `cargo`, `rustc`, `rustup` | `rustfmt`, `clippy` |
+| **Go** | `go` | `gofmt`, `golint` |
+| **Java** | `java`, `javac`, `mvn`, `gradle` | Maven, Gradle |
+| **.NET** | `dotnet` | .NET CLI |
+| **Ruby** | `ruby`, `gem`, `bundle`, `rake` | `rspec` |
+
+**Security**: All commands are allowlisted. Dangerous commands (`curl`, `wget`, `ssh`, `sudo`, `docker`) remain blocked.
 
 ---
 
