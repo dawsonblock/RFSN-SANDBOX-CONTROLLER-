@@ -87,8 +87,6 @@ class TestPromptStructure:
 
     def test_deepseek_prompt_includes_engineering_heuristics(self):
         """Test that DeepSeek prompt includes key sections for proper behavior."""
-    def test_deepseek_prompt_includes_engineering_heuristics(self):
-        """Test that DeepSeek prompt includes key sections for proper behavior."""
         # The new prompt has different sections but same intent
         assert "SHELL-LESS COMMAND RULES" in DEEPSEEK_SYSTEM or "NO SHELL" in DEEPSEEK_SYSTEM
         assert "HYGIENE PROFILE BEHAVIOR" in DEEPSEEK_SYSTEM or "REPAIR MODE" in DEEPSEEK_SYSTEM
