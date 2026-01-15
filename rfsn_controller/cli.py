@@ -167,6 +167,11 @@ def main() -> None:
         help="Repro command for verification (e.g., 'pytest -q --repeat=2')",
     )
     parser.add_argument(
+        "--verify-cmd",
+        default=None,
+        help="Smoke test command for feature verification (e.g., './run_smoke_tests.sh')",
+    )
+    parser.add_argument(
         "--dry-run",
         action="store_true",
         help=(
@@ -286,6 +291,7 @@ def main() -> None:
         lint_cmd=args.lint_cmd,
         typecheck_cmd=args.typecheck_cmd,
         repro_cmd=args.repro_cmd,
+        verify_cmd=args.verify_cmd,
         dry_run=args.dry_run,
         project_type=args.project_type,
         buildpack=args.buildpack,

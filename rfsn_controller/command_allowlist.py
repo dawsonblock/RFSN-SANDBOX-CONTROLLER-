@@ -73,7 +73,6 @@ ALLOWED_COMMANDS: Set[str] = {
     "grep",
     "find",
     "ls",
-    "cd",
     "pwd",
     "echo",
     "mkdir",

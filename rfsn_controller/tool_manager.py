@@ -27,14 +27,18 @@ class ToolRequest:
     
     def signature(self) -> str:
         """Generate a unique signature for this request."""
+        import json
         # Create a deterministic string representation
         parts = [self.tool]
         for key in sorted(self.args.keys()):
             value = self.args[key]
-            if isinstance(value, (str, int, float, bool)):
+            if isinstance(value, (str, int, float, bool, type(None))):
                 parts.append(f"{key}:{value}")
+            elif isinstance(value, (dict, list)):
+                # Use json.dumps with sorted keys for deterministic hashing
+                parts.append(f"{key}:{json.dumps(value, sort_keys=True)}")
             else:
-                # For complex types, use string representation
+                # For other complex types, use string representation
                 parts.append(f"{key}:{str(value)}")
         
         signature_str = "|".join(parts)

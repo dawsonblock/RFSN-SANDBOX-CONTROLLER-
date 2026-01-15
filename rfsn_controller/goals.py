@@ -195,6 +195,30 @@ class GoalFactory:
         )
 
     @staticmethod
+    def create_verify_goal(
+        command: str,
+        timeout: int = 300,
+        required: bool = False,
+    ) -> Goal:
+        """Create a verification/smoke test goal.
+
+        Args:
+            command: Verification/smoke test command.
+            timeout: Timeout in seconds.
+            required: Whether this goal must pass.
+
+        Returns:
+            Goal instance.
+        """
+        return Goal(
+            goal_type=GoalType.CUSTOM,
+            command=command,
+            description="Smoke test succeeds",
+            timeout=timeout,
+            required=required,
+        )
+
+    @staticmethod
     def create_custom_goal(
         command: str,
         description: str,
@@ -279,6 +303,7 @@ class GoalSetFactory:
         lint_cmd: Optional[str] = None,
         typecheck_cmd: Optional[str] = None,
         repro_cmd: Optional[str] = None,
+        verify_cmd: Optional[str] = None,
     ) -> GoalSet:
         """Create goal set for Python project.
 
@@ -287,6 +312,7 @@ class GoalSetFactory:
             lint_cmd: Optional lint command.
             typecheck_cmd: Optional typecheck command.
             repro_cmd: Optional repro command.
+            verify_cmd: Optional smoke test command.
 
         Returns:
             GoalSet instance.
@@ -304,6 +330,10 @@ class GoalSetFactory:
             )
         if repro_cmd:
             verification.append(GoalFactory.create_repro_goal(repro_cmd))
+        if verify_cmd:
+            verification.append(
+                GoalFactory.create_verify_goal(verify_cmd, required=False)
+            )
 
         return GoalSet(primary_goal=primary, verification_goals=verification)
 
@@ -312,6 +342,7 @@ class GoalSetFactory:
         test_cmd: str = "npm test",
         build_cmd: Optional[str] = None,
         lint_cmd: Optional[str] = None,
+        verify_cmd: Optional[str] = None,
     ) -> GoalSet:
         """Create goal set for Node.js project.
 
@@ -319,6 +350,7 @@ class GoalSetFactory:
             test_cmd: Test command.
             build_cmd: Optional build command.
             lint_cmd: Optional lint command.
+            verify_cmd: Optional smoke test command.
 
         Returns:
             GoalSet instance.
@@ -334,6 +366,10 @@ class GoalSetFactory:
             verification.append(
                 GoalFactory.create_lint_goal(lint_cmd, required=False)
             )
+        if verify_cmd:
+            verification.append(
+                GoalFactory.create_verify_goal(verify_cmd, required=False)
+            )
 
         return GoalSet(primary_goal=primary, verification_goals=verification)
 
@@ -341,12 +377,14 @@ class GoalSetFactory:
     def for_go(
         test_cmd: str = "go test ./...",
         build_cmd: Optional[str] = None,
+        verify_cmd: Optional[str] = None,
     ) -> GoalSet:
         """Create goal set for Go project.
 
         Args:
             test_cmd: Test command.
             build_cmd: Optional build command.
+            verify_cmd: Optional smoke test command.
 
         Returns:
             GoalSet instance.
@@ -357,6 +395,10 @@ class GoalSetFactory:
         if build_cmd:
             verification.append(
                 GoalFactory.create_build_goal(build_cmd, required=False)
+            )
+        if verify_cmd:
+            verification.append(
+                GoalFactory.create_verify_goal(verify_cmd, required=False)
             )
 
         return GoalSet(primary_goal=primary, verification_goals=verification)
@@ -366,6 +408,7 @@ class GoalSetFactory:
         test_cmd: str = "cargo test",
         build_cmd: Optional[str] = None,
         lint_cmd: Optional[str] = None,
+        verify_cmd: Optional[str] = None,
     ) -> GoalSet:
         """Create goal set for Rust project.
 
@@ -373,6 +416,7 @@ class GoalSetFactory:
             test_cmd: Test command.
             build_cmd: Optional build command.
             lint_cmd: Optional lint command.
+            verify_cmd: Optional smoke test command.
 
         Returns:
             GoalSet instance.
@@ -388,6 +432,10 @@ class GoalSetFactory:
             verification.append(
                 GoalFactory.create_lint_goal(lint_cmd, required=False)
             )
+        if verify_cmd:
+            verification.append(
+                GoalFactory.create_verify_goal(verify_cmd, required=False)
+            )
 
         return GoalSet(primary_goal=primary, verification_goals=verification)
 
@@ -395,12 +443,14 @@ class GoalSetFactory:
     def for_java(
         test_cmd: str = "mvn test",
         build_cmd: Optional[str] = None,
+        verify_cmd: Optional[str] = None,
     ) -> GoalSet:
         """Create goal set for Java project.
 
         Args:
             test_cmd: Test command.
             build_cmd: Optional build command.
+            verify_cmd: Optional smoke test command.
 
         Returns:
             GoalSet instance.
@@ -411,6 +461,10 @@ class GoalSetFactory:
         if build_cmd:
             verification.append(
                 GoalFactory.create_build_goal(build_cmd, required=False)
+            )
+        if verify_cmd:
+            verification.append(
+                GoalFactory.create_verify_goal(verify_cmd, required=False)
             )
 
         return GoalSet(primary_goal=primary, verification_goals=verification)
