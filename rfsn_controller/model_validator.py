@@ -164,12 +164,21 @@ class ModelOutputValidator:
             args = req.get("args", {})
             
             # Check command arguments for shell idioms
-            if tool == "sandbox.run" and "cmd" in args:
+            if tool == "sandbox.run":
+                if not isinstance(args, dict) or "cmd" not in args or not args["cmd"]:
+                    return ModelOutput(
+                        mode="tool_request",
+                        requests=[{"tool": "sandbox.read_file", "args": {"path": "README.md"}}],
+                        why="Invalid sandbox.run request: missing required 'cmd' (must be a single command string).",
+                        is_valid=False,
+                        validation_error=f"Request {i} missing cmd for sandbox.run",
+                    )
+
                 cmd = args["cmd"]
                 if not isinstance(cmd, str):
                     return ModelOutput(
                         mode="tool_request",
-                        requests=[],
+                        requests=[{"tool": "sandbox.read_file", "args": {"path": "README.md"}}],
                         why="Invalid sandbox.run request: 'cmd' must be a string (single command).",
                         is_valid=False,
                         validation_error=f"Request {i} has non-string cmd",
