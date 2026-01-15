@@ -20,15 +20,13 @@ class PatchHygieneConfig:
         self,
         max_lines_changed: int = 200,
         max_files_changed: int = 5,
-        forbidden_dirs: Optional[Set[str]] = None,
-        forbidden_file_patterns: Optional[Set[str]] = None,
         allow_test_deletion: bool = False,
         allow_test_modification: bool = False,
         language: Optional[str] = None,
     ):
         self.max_lines_changed = max_lines_changed
         self.max_files_changed = max_files_changed
-        # Forbidden dirs and patterns are always strict (non-configurable)
+        # Forbidden dirs and patterns are always strict (non-configurable for security)
         self.forbidden_dirs = self._default_forbidden_dirs()
         self.forbidden_file_patterns = self._default_forbidden_patterns()
         self.allow_test_deletion = allow_test_deletion

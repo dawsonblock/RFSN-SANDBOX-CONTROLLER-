@@ -5,6 +5,7 @@ and enforces quotas to control token usage and prevent stalling.
 """
 
 import hashlib
+import json
 from typing import Dict, Set, Optional, Any
 from dataclasses import dataclass, field
 
@@ -27,7 +28,6 @@ class ToolRequest:
     
     def signature(self) -> str:
         """Generate a unique signature for this request."""
-        import json
         # Create a deterministic string representation
         parts = [self.tool]
         for key in sorted(self.args.keys()):
