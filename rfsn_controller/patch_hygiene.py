@@ -20,20 +20,21 @@ class PatchHygieneConfig:
         self,
         max_lines_changed: int = 200,
         max_files_changed: int = 5,
-        forbidden_dirs: Optional[Set[str]] = None,
-        forbidden_file_patterns: Optional[Set[str]] = None,
         allow_test_deletion: bool = False,
         allow_test_modification: bool = False,
+        language: Optional[str] = None,
     ):
         self.max_lines_changed = max_lines_changed
         self.max_files_changed = max_files_changed
-        self.forbidden_dirs = forbidden_dirs or self._default_forbidden_dirs()
-        self.forbidden_file_patterns = forbidden_file_patterns or self._default_forbidden_patterns()
+        # Forbidden dirs and patterns are always strict (non-configurable for security)
+        self.forbidden_dirs = self._default_forbidden_dirs()
+        self.forbidden_file_patterns = self._default_forbidden_patterns()
         self.allow_test_deletion = allow_test_deletion
         self.allow_test_modification = allow_test_modification
+        self.language = language
     
     @classmethod
-    def for_repair_mode(cls) -> 'PatchHygieneConfig':
+    def for_repair_mode(cls, language: Optional[str] = None) -> 'PatchHygieneConfig':
         """Create a strict configuration for repair mode.
         
         Repair mode requires minimal changes to fix bugs:
@@ -41,16 +42,20 @@ class PatchHygieneConfig:
         - Max 5 files changed
         - No test deletion
         - No test modification
+        
+        Args:
+            language: Optional language for language-specific adjustments.
         """
         return cls(
             max_lines_changed=200,
             max_files_changed=5,
             allow_test_deletion=False,
             allow_test_modification=False,
+            language=language,
         )
     
     @classmethod
-    def for_feature_mode(cls) -> 'PatchHygieneConfig':
+    def for_feature_mode(cls, language: Optional[str] = None) -> 'PatchHygieneConfig':
         """Create a more permissive configuration for feature mode.
         
         Feature mode allows larger changes for feature implementation:
@@ -58,12 +63,58 @@ class PatchHygieneConfig:
         - Max 15 files changed (allows multi-module features)
         - Allows test creation and modification
         - No test deletion (tests are deliverables)
+        
+        Language-specific adjustments:
+        - Java/C#: +200 lines (boilerplate-heavy)
+        - Node.js: +100 lines (config files)
+        
+        Args:
+            language: Optional language for language-specific adjustments.
         """
+        max_lines = 500
+        max_files = 15
+        
+        # Language-specific adjustments
+        if language in ['java', 'csharp', 'dotnet']:
+            max_lines += 200  # Boilerplate-heavy languages
+        elif language in ['node', 'javascript', 'typescript']:
+            max_lines += 100  # Package.json, config files
+        
         return cls(
-            max_lines_changed=500,
-            max_files_changed=15,
+            max_lines_changed=max_lines,
+            max_files_changed=max_files,
             allow_test_deletion=False,
             allow_test_modification=True,
+            language=language,
+        )
+    
+    @classmethod
+    def custom(
+        cls,
+        max_lines_changed: int,
+        max_files_changed: int,
+        allow_test_deletion: bool = False,
+        allow_test_modification: bool = False,
+        language: Optional[str] = None,
+    ) -> 'PatchHygieneConfig':
+        """Create a custom configuration with specific thresholds.
+        
+        Note: forbidden_dirs and forbidden_file_patterns are always strict
+        and cannot be overridden for security reasons.
+        
+        Args:
+            max_lines_changed: Maximum lines that can be changed.
+            max_files_changed: Maximum files that can be changed.
+            allow_test_deletion: Whether to allow test file deletion.
+            allow_test_modification: Whether to allow test file modification.
+            language: Optional language identifier.
+        """
+        return cls(
+            max_lines_changed=max_lines_changed,
+            max_files_changed=max_files_changed,
+            allow_test_deletion=allow_test_deletion,
+            allow_test_modification=allow_test_modification,
+            language=language,
         )
     
     @staticmethod

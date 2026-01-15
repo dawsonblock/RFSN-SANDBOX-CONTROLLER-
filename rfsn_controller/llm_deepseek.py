@@ -174,7 +174,7 @@ TOOLING RULES
 ═══════════════════════════════════════════════════════════════
 
 - You cannot use shell features like `cd`, pipes, or &&.
-- Commands run from the repository root unless otherwise specified.
+- The `cd` command is NOT available. Commands run from the repository root.
 - Pass paths explicitly instead of changing directories.
 - Do not request tools you do not need.
 

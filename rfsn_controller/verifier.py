@@ -50,6 +50,7 @@ class Verifier:
         lint_cmd: Optional[str] = None,
         typecheck_cmd: Optional[str] = None,
         repro_cmd: Optional[str] = None,
+        verify_cmd: Optional[str] = None,
         docker_image: str = "python:3.11-slim",
         cpu: float = 2.0,
         mem_mb: int = 4096,
@@ -65,6 +66,7 @@ class Verifier:
             lint_cmd: Lint command (optional).
             typecheck_cmd: Typecheck command (optional).
             repro_cmd: Repro command (optional).
+            verify_cmd: Smoke test command for feature verification (optional).
             docker_image: Docker image to use.
             cpu: CPU limit.
             mem_mb: Memory limit in MB.
@@ -77,6 +79,7 @@ class Verifier:
         self.lint_cmd = lint_cmd
         self.typecheck_cmd = typecheck_cmd
         self.repro_cmd = repro_cmd
+        self.verify_cmd = verify_cmd
         self.docker_image = docker_image
         self.cpu = cpu
         self.mem_mb = mem_mb
@@ -94,9 +97,10 @@ class Verifier:
         Verification order:
         1. Focus test (if provided)
         2. Full tests
-        3. Repro (if enabled)
-        4. Lint (if enabled)
-        5. Typecheck (if enabled)
+        3. Verify/Smoke test (if enabled)
+        4. Repro (if enabled)
+        5. Lint (if enabled)
+        6. Typecheck (if enabled)
 
         Args:
             timeout_sec: Timeout for each verification step.
@@ -135,7 +139,20 @@ class Verifier:
                 failed_checks=sum(1 for r in results if not r.ok),
             )
 
-        # 3. Repro (optional)
+        # 3. Verify/Smoke test (optional)
+        if self.verify_cmd:
+            result = self._run_verify(self.verify_cmd, "verify", timeout_sec)
+            results.append(result)
+            if not result.ok:
+                return VerifySummary(
+                    all_passed=False,
+                    results=results,
+                    total_checks=len(results),
+                    passed_checks=sum(1 for r in results if r.ok),
+                    failed_checks=sum(1 for r in results if not r.ok),
+                )
+
+        # 4. Repro (optional)
         if self.repro_cmd:
             result = self._run_verify(self.repro_cmd, "repro", timeout_sec)
             results.append(result)
@@ -148,7 +165,7 @@ class Verifier:
                     failed_checks=sum(1 for r in results if not r.ok),
                 )
 
-        # 4. Lint (optional)
+        # 5. Lint (optional)
         if self.lint_cmd:
             result = self._run_verify(self.lint_cmd, "lint", timeout_sec)
             results.append(result)
@@ -161,7 +178,7 @@ class Verifier:
                     failed_checks=sum(1 for r in results if not r.ok),
                 )
 
-        # 5. Typecheck (optional)
+        # 6. Typecheck (optional)
         if self.typecheck_cmd:
             result = self._run_verify(self.typecheck_cmd, "typecheck", timeout_sec)
             results.append(result)

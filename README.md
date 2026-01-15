@@ -104,7 +104,7 @@ The controller supports a wide range of programming languages and build tools:
 ### Prerequisites
 
 - Python 3.9 or higher
-- DeepSeek API key ([Get one here](https://platform.deepseek.com/)) or Gemini API key ([Get one here](https://ai.google.dev/))
+- API key for your chosen LLM provider (DeepSeek or Gemini)
 
 ### Setup
 
@@ -122,7 +122,7 @@ pip install -r requirements.txt
 
 # Configure API key
 cp .env.example .env
-# Edit .env and add your DEEPSEEK_API_KEY or GEMINI_API_KEY
+# Edit .env and add your API key (DEEPSEEK_API_KEY or GEMINI_API_KEY)
 ```
 
 ### Docker Setup (Recommended for Production)

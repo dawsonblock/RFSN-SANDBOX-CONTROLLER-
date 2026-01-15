@@ -339,6 +339,7 @@ class ControllerConfig:
     lint_cmd: Optional[str] = None
     typecheck_cmd: Optional[str] = None
     repro_cmd: Optional[str] = None
+    verify_cmd: Optional[str] = None
     dry_run: bool = False
     project_type: str = "auto"
     buildpack: str = "auto"
