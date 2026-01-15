@@ -1527,6 +1527,19 @@ def run_controller(cfg: ControllerConfig) -> Dict[str, Any]:
             if run_cmd_verification:
                 for idx, cmd in enumerate(cfg.focused_verify_cmds):
                     total_verification_attempts += 1
+                    
+                    # Check verification budget
+                    if total_verification_attempts > cfg.max_verification_attempts:
+                        bailout_reason = f"Verification attempt budget exhausted ({total_verification_attempts}/{cfg.max_verification_attempts})"
+                        print(f"\n❌ Early termination: {bailout_reason}")
+                        log({
+                            "phase": "bailout",
+                            "reason": bailout_reason,
+                            "total_verification_attempts": total_verification_attempts,
+                        })
+                        verification_passed = False
+                        break
+                    
                     print(f"\n[FINAL_VERIFY] Running focused verification {idx+1}/{len(cfg.focused_verify_cmds)}: {cmd}")
                     v_result = _run_tests_in_sandbox(sb, cmd, cfg, command_log, selected_buildpack, selected_buildpack_instance)
                     verification_results.append({
@@ -1551,6 +1564,19 @@ def run_controller(cfg: ControllerConfig) -> Dict[str, Any]:
             if run_cmd_verification:
                 for idx, cmd in enumerate(cfg.verify_cmds):
                     total_verification_attempts += 1
+                    
+                    # Check verification budget
+                    if total_verification_attempts > cfg.max_verification_attempts:
+                        bailout_reason = f"Verification attempt budget exhausted ({total_verification_attempts}/{cfg.max_verification_attempts})"
+                        print(f"\n❌ Early termination: {bailout_reason}")
+                        log({
+                            "phase": "bailout",
+                            "reason": bailout_reason,
+                            "total_verification_attempts": total_verification_attempts,
+                        })
+                        verification_passed = False
+                        break
+                    
                     print(f"\n[FINAL_VERIFY] Running verification {idx+1}/{len(cfg.verify_cmds)}: {cmd}")
                     v_result = _run_tests_in_sandbox(sb, cmd, cfg, command_log, selected_buildpack, selected_buildpack_instance)
                     verification_results.append({
@@ -1574,21 +1600,38 @@ def run_controller(cfg: ControllerConfig) -> Dict[str, Any]:
             # 3. Test command (unless policy is "cmds_only")
             if cfg.verify_policy != "cmds_only":
                 # Run tests with reproducibility check (N times if configured)
+                # Ensure at least 1 run
+                repro_times = max(1, cfg.repro_times)
                 repro_passed = True
-                for run_idx in range(cfg.repro_times):
+                for run_idx in range(repro_times):
                     # Track verification attempts
                     total_verification_attempts += 1
                     
-                    if cfg.repro_times > 1:
-                        print(f"\n[FINAL_VERIFY] Running test suite (run {run_idx+1}/{cfg.repro_times}): {effective_test_cmd}")
+                    # Check verification budget
+                    if total_verification_attempts > cfg.max_verification_attempts:
+                        bailout_reason = f"Verification attempt budget exhausted ({total_verification_attempts}/{cfg.max_verification_attempts})"
+                        print(f"\n❌ Early termination: {bailout_reason}")
+                        log({
+                            "phase": "bailout",
+                            "reason": bailout_reason,
+                            "total_verification_attempts": total_verification_attempts,
+                        })
+                        verification_passed = False
+                        # Set v and final_output if not already set
+                        if run_idx == 0:
+                            v = VerifyResult(ok=False, exit_code=1, stdout="", stderr="Budget exhausted", failing_tests=[], sig="")
+                            final_output = "Budget exhausted"
+                        break
+                    
+                    if repro_times > 1:
+                        print(f"\n[FINAL_VERIFY] Running test suite (run {run_idx+1}/{repro_times}): {effective_test_cmd}")
                     else:
                         print(f"\n[FINAL_VERIFY] Running test suite: {effective_test_cmd}")
                     
                     v = _run_tests_in_sandbox(sb, effective_test_cmd, cfg, command_log, selected_buildpack, selected_buildpack_instance)
                     
-                    # Store final output from last run
-                    if run_idx == cfg.repro_times - 1:
-                        final_output = (v.stdout or "") + "\n" + (v.stderr or "")
+                    # Always store final output from current run (in case we break early)
+                    final_output = (v.stdout or "") + "\n" + (v.stderr or "")
                     
                     verification_results.append({
                         "type": "tests",
@@ -1609,7 +1652,7 @@ def run_controller(cfg: ControllerConfig) -> Dict[str, Any]:
                         print(f"  ❌ Tests failed (run {run_idx+1}): {len(v.failing_tests)} failing tests")
                         verification_passed = False
                         repro_passed = False
-                        if cfg.repro_times > 1:
+                        if repro_times > 1:
                             print(f"  ⚠️  Stopping reproducibility check due to failure")
                             break
                     else:
