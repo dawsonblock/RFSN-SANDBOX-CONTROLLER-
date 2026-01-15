@@ -8,9 +8,9 @@
 ![Docker](https://img.shields.io/badge/Docker-Supported-blue?style=for-the-badge&logo=docker)
 ![License](https://img.shields.io/badge/License-MIT-orange?style=for-the-badge)
 
-**A commercial-grade autonomous code repair agent with production hardening**
+**An intelligent autonomous code agent for bug fixing AND feature development**
 
-[Features](#features) • [Installation](#installation) • [Usage](#usage) • [Docker](#docker) • [Examples](#examples) • [Architecture](#architecture)
+[Features](#features) • [Installation](#installation) • [Usage](#usage) • [Docker](#docker) • [Examples](#examples) • [Architecture](#architecture) • [Feature Mode](#feature-mode)
 
 </div>
 
@@ -18,7 +18,12 @@
 
 ## Overview
 
-RFSN Sandbox Controller is an intelligent automated bug-fixing system designed for **real-world production repositories**. It combines:
+RFSN Sandbox Controller is an intelligent automated coding system designed for **real-world production repositories**. It operates in two modes:
+
+- **🔧 Repair Mode**: Automatically fix bugs and make tests pass
+- **✨ Feature Mode**: Implement new features from scratch with acceptance criteria
+
+It combines:
 
 - 🔧 **Docker-based isolation** for secure, reproducible repairs
 - 🛡️ **Strict security hardening** with command allowlisting and URL validation
@@ -124,7 +129,9 @@ docker-compose run quixbugs
 
 ## Usage
 
-### Basic Command (Auto-detects test command)
+### Repair Mode (Default): Fix Bugs and Make Tests Pass
+
+#### Basic Command (Auto-detects test command)
 
 ```bash
 python -m rfsn_controller.cli \
@@ -134,7 +141,26 @@ python -m rfsn_controller.cli \
 
 **Note**: The controller auto-detects the appropriate test command based on the project type (Python, Node.js, etc.). Only use `--test` if you need to override the auto-detected command.
 
-### Options
+### Feature Mode: Implement New Features
+
+Implement complete features from scratch with acceptance criteria:
+
+```bash
+python -m rfsn_controller.cli \
+  --repo "https://github.com/OWNER/REPO" \
+  --feature-mode \
+  --feature-description "Add user authentication with JWT tokens" \
+  --acceptance-criteria "Users can log in with email/password" \
+  --acceptance-criteria "JWT tokens are validated on protected routes" \
+  --acceptance-criteria "Tokens expire after 24 hours" \
+  --steps 20
+```
+
+**See [FEATURE_MODE.md](FEATURE_MODE.md) for comprehensive feature mode documentation.**
+
+---
+
+## Options
 
 | Option | Description | Default |
 |--------|-------------|---------|
@@ -146,6 +172,9 @@ python -m rfsn_controller.cli \
 | `--fix-all` | Continue until all tests pass | `False` |
 | `--max-steps-without-progress` | Early termination threshold | 10 |
 | `--collect-finetuning-data` | Export evidence packs | `False` |
+| `--feature-mode` | Enable feature engineering mode | `False` |
+| `--feature-description` | Feature specification for feature mode | `None` |
+| `--acceptance-criteria` | Acceptance criteria (can be specified multiple times) | `[]` |
 
 ### Environment Variables
 
