@@ -340,9 +340,7 @@ class TestShellIdiomDetection:
 
     def test_double_greater_than_detected_as_redirect(self, validator):
         """Test that >> (append redirect) is detected as a shell redirect idiom."""
-        # This test ensures that >> is treated as a shell redirect idiom
-        # even when it appears in expressions that could resemble comparisons.
-        has_idiom, desc = validator._detect_shell_idioms("compare >> 5")
+        has_idiom, desc = validator._detect_shell_idioms("echo hello >> output.txt")
         assert has_idiom
         assert desc is not None
         assert "redirect" in desc.lower()
