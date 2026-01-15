@@ -1514,7 +1514,14 @@ def run_controller(cfg: ControllerConfig) -> Dict[str, Any]:
             else:
                 # For cmds_only policy, create a placeholder result
                 v = VerifyResult(ok=verification_passed, exit_code=0, stdout="", stderr="", failing_tests=[], sig="")
-                final_output = ""
+                v = VerifyResult(
+                    ok=verification_passed,
+                    exit_code=0 if verification_passed else 1,
+                    stdout="",
+                    stderr="",
+                    failing_tests=[],
+                    sig="",
+                )
 
             # Overall verification result
             log({
