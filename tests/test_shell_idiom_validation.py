@@ -345,6 +345,14 @@ class TestShellIdiomDetection:
         assert desc is not None
         assert "redirect" in desc.lower()
 
+        # Negative control: '>' in source code should not be treated as a shell redirect
+        has_idiom, desc = validator._detect_shell_idioms("python -c \"print(1 > 0)\"")
+        assert not has_idiom
+        assert desc is None
+        assert has_idiom
+        assert desc is not None
+        assert "redirect" in desc.lower()
+
 
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])
