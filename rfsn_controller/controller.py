@@ -373,6 +373,12 @@ class ControllerConfig:
     max_lines_changed: Optional[int] = None
     max_files_changed: Optional[int] = None
     allow_lockfile_changes: bool = False
+    # Phase budget limits for reliability
+    max_install_attempts: int = 3
+    max_patch_attempts: int = 20
+    max_verification_attempts: int = 5
+    # Verification repeatability
+    repro_times: int = 1  # Run verification N times to ensure reproducibility
 
 
 def run_controller(cfg: ControllerConfig) -> Dict[str, Any]:
@@ -921,6 +927,11 @@ def run_controller(cfg: ControllerConfig) -> Dict[str, Any]:
         max_iterations = float('inf') if cfg.fix_all else cfg.max_steps
         step = 0
         
+        # Budget tracking for reliability
+        total_tool_calls = 0
+        total_patch_attempts = 0
+        total_verification_attempts = 0
+        
         # Feature mode tracking
         feature_subgoals = list(DEFAULT_FEATURE_SUBGOALS)
         completed_feature_subgoals = []
@@ -1218,6 +1229,31 @@ def run_controller(cfg: ControllerConfig) -> Dict[str, Any]:
                         "results": tool_results,
                         "blocked": blocked_reasons,
                     })
+                    
+                    # Track tool call budget
+                    total_tool_calls += len(allowed_requests)
+                    
+                    # Provide structured feedback for blocked tool requests
+                    if blocked_reasons:
+                        for reason in blocked_reasons:
+                            if reason:
+                                # Build helpful feedback message
+                                feedback = f"\n⚠️  BLOCKED TOOL REQUEST: {reason}\n"
+                                if "shell idiom" in reason.lower() or "shell=False" in reason:
+                                    feedback += "  → Split compound commands into separate tool_request entries\n"
+                                    feedback += "  → Use simple commands only (no &&, ||, pipes, redirects)\n"
+                                    feedback += "  → Commands run from repo root - cd is not needed\n"
+                                elif "allowlist" in reason.lower() or "not allowed" in reason.lower():
+                                    feedback += "  → Use only allowed commands for this project type\n"
+                                    feedback += "  → Check project detection and available tools\n"
+                                elif "quota" in reason.lower():
+                                    feedback += f"  → Tool quota limit reached ({cfg.max_tool_calls} total)\n"
+                                    feedback += "  → Focus on high-value operations only\n"
+                                else:
+                                    feedback += "  → Review command structure and arguments\n"
+                                
+                                print(feedback)
+                                observations += feedback
 
                     if (
                         not allowed_requests
@@ -1226,13 +1262,14 @@ def run_controller(cfg: ControllerConfig) -> Dict[str, Any]:
                             for br in blocked_reasons
                         )
                     ):
-                        bailout_reason = "Tool quota exhausted"
+                        bailout_reason = f"Tool quota exhausted ({total_tool_calls}/{cfg.max_tool_calls} calls used)"
                         print(f"\n❌ Early termination: {bailout_reason}")
                         log({
                             "phase": "bailout",
                             "step": step,
                             "reason": bailout_reason,
                             "tool_stats": tool_manager.get_stats(),
+                            "total_tool_calls": total_tool_calls,
                         })
                         current_phase = Phase.BAILOUT
                         break
@@ -1272,11 +1309,34 @@ def run_controller(cfg: ControllerConfig) -> Dict[str, Any]:
                     })
                     
                     if completion_status == "complete":
-                        print(f"\n✅ FEATURE COMPLETE after {step} steps")
-                        # Store summary for evidence pack and transition to FINAL_VERIFY
-                        feature_summary = summary
-                        current_phase = Phase.FINAL_VERIFY
-                        break  # Exit repair loop to run FINAL_VERIFY
+                        # GATING: Do not accept "complete" without verification
+                        # Run a quick verification to ensure tests pass
+                        print(f"\n[Step {step}] Feature claims completion - running verification...")
+                        v_check = _run_tests_in_sandbox(sb, effective_test_cmd, cfg, command_log, selected_buildpack, selected_buildpack_instance)
+                        
+                        if v_check.ok:
+                            print(f"\n✅ FEATURE COMPLETE after {step} steps (verification passed)")
+                            # Store summary for evidence pack and transition to FINAL_VERIFY
+                            feature_summary = summary
+                            current_phase = Phase.FINAL_VERIFY
+                            break  # Exit repair loop to run FINAL_VERIFY
+                        else:
+                            # Verification failed - force back into repair loop
+                            feedback = (
+                                f"\n⚠️  COMPLETION REJECTED: Verification failed with {len(v_check.failing_tests)} failing tests.\n"
+                                "  → Cannot mark completion_status='complete' until all tests pass\n"
+                                "  → Continue implementing and fixing until verification succeeds\n"
+                                f"  → Failing tests: {v_check.failing_tests[:5]}\n"
+                            )
+                            print(feedback)
+                            observations += feedback
+                            log({
+                                "phase": "feature_completion_rejected",
+                                "step": step,
+                                "reason": "verification_failed",
+                                "failing_tests": v_check.failing_tests[:10],
+                            })
+                            # Continue loop - do not accept premature completion
                     elif completion_status == "blocked":
                         bailout_reason = f"Feature blocked: {summary[:100]}"
                         print(f"\n❌ Early termination: {bailout_reason}")
@@ -1361,6 +1421,22 @@ def run_controller(cfg: ControllerConfig) -> Dict[str, Any]:
                         })
 
                 if valid_patches:
+                    # Track patch attempts budget
+                    total_patch_attempts += len(valid_patches)
+                    
+                    # Check patch attempt budget
+                    if total_patch_attempts > cfg.max_patch_attempts:
+                        bailout_reason = f"Patch attempt budget exhausted ({total_patch_attempts}/{cfg.max_patch_attempts})"
+                        print(f"\n❌ Early termination: {bailout_reason}")
+                        log({
+                            "phase": "bailout",
+                            "step": step,
+                            "reason": bailout_reason,
+                            "total_patch_attempts": total_patch_attempts,
+                        })
+                        current_phase = Phase.BAILOUT
+                        break
+                    
                     # Evaluate in parallel worktrees
                     results = evaluate_patches_parallel(
                         sb,
@@ -1495,26 +1571,47 @@ def run_controller(cfg: ControllerConfig) -> Dict[str, Any]:
             
             # 3. Test command (unless policy is "cmds_only")
             if cfg.verify_policy != "cmds_only":
-                print(f"\n[FINAL_VERIFY] Running test suite: {effective_test_cmd}")
-                v = _run_tests_in_sandbox(sb, effective_test_cmd, cfg, command_log, selected_buildpack, selected_buildpack_instance)
-                final_output = (v.stdout or "") + "\n" + (v.stderr or "")
-                verification_results.append({
-                    "type": "tests",
-                    "command": effective_test_cmd,
-                    "passed": v.ok,
-                    "exit_code": v.exit_code,
-                })
-                log({
-                    "phase": "test_verify",
-                    "command": effective_test_cmd,
-                    "passed": v.ok,
-                    "exit_code": v.exit_code,
-                })
-                if not v.ok:
-                    print(f"  ❌ Tests failed: {len(v.failing_tests)} failing tests")
-                    verification_passed = False
-                else:
-                    print("  ✅ Tests passed")
+                # Run tests with reproducibility check (N times if configured)
+                repro_passed = True
+                for run_idx in range(cfg.repro_times):
+                    if cfg.repro_times > 1:
+                        print(f"\n[FINAL_VERIFY] Running test suite (run {run_idx+1}/{cfg.repro_times}): {effective_test_cmd}")
+                    else:
+                        print(f"\n[FINAL_VERIFY] Running test suite: {effective_test_cmd}")
+                    
+                    v = _run_tests_in_sandbox(sb, effective_test_cmd, cfg, command_log, selected_buildpack, selected_buildpack_instance)
+                    
+                    # Store final output from last run
+                    if run_idx == cfg.repro_times - 1:
+                        final_output = (v.stdout or "") + "\n" + (v.stderr or "")
+                    
+                    verification_results.append({
+                        "type": "tests",
+                        "command": effective_test_cmd,
+                        "passed": v.ok,
+                        "exit_code": v.exit_code,
+                        "run": run_idx + 1,
+                    })
+                    log({
+                        "phase": "test_verify",
+                        "command": effective_test_cmd,
+                        "passed": v.ok,
+                        "exit_code": v.exit_code,
+                        "run": run_idx + 1,
+                    })
+                    
+                    if not v.ok:
+                        print(f"  ❌ Tests failed (run {run_idx+1}): {len(v.failing_tests)} failing tests")
+                        verification_passed = False
+                        repro_passed = False
+                        if cfg.repro_times > 1:
+                            print(f"  ⚠️  Stopping reproducibility check due to failure")
+                            break
+                    else:
+                        print(f"  ✅ Tests passed (run {run_idx+1})")
+                
+                if repro_passed and cfg.repro_times > 1:
+                    print(f"\n✅ Test suite is reproducible ({cfg.repro_times}/{cfg.repro_times} runs passed)")
             else:
                 # For cmds_only policy, create a placeholder result
                 v = VerifyResult(
@@ -1557,6 +1654,15 @@ def run_controller(cfg: ControllerConfig) -> Dict[str, Any]:
             "final_ok": v.ok,
             "bailout_reason": bailout_reason,
             "feature_summary": feature_summary,  # Include feature summary if present
+            # Budget tracking
+            "total_tool_calls": total_tool_calls,
+            "total_patch_attempts": total_patch_attempts,
+            "total_verification_attempts": total_verification_attempts,
+            "budgets": {
+                "max_tool_calls": cfg.max_tool_calls,
+                "max_patch_attempts": cfg.max_patch_attempts,
+                "max_verification_attempts": cfg.max_verification_attempts,
+            },
         }
 
         pack_dir = evidence_exporter.export(
