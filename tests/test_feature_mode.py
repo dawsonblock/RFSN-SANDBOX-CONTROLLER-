@@ -65,6 +65,46 @@ class TestModelValidator:
             assert result.is_valid, f"Status {status} should be valid"
             assert result.completion_status == status
 
+    def test_shell_idiom_detection(self):
+        """Test detection of shell idioms."""
+        validator = ModelOutputValidator()
+        
+        # Test various shell idioms that should be detected
+        test_cases = [
+            ("npm install && npm test", "&&"),
+            ("cat file.txt | grep pattern", "|"),
+            ("echo hello > output.txt", ">"),
+            ("cat < input.txt", "<"),
+            ("result=$(command)", "$()"),
+            ("result=`command`", "backtick"),
+            ("cd /tmp", "cd"),
+            ("cd src", "cd"),
+            ("ENV_VAR=value python script.py", "environment variable"),
+        ]
+        
+        for text, keyword in test_cases:
+            has_idiom, description = validator._detect_shell_idioms(text)
+            assert has_idiom, f"Should detect shell idiom in: {text} (expected keyword: {keyword})"
+            assert description is not None, f"Description should not be None for: {text}"
+    
+    def test_shell_idiom_no_false_positives(self):
+        """Test that normal commands don't trigger false positives."""
+        validator = ModelOutputValidator()
+        
+        # These should NOT be detected as shell idioms
+        safe_cases = [
+            "npm install",
+            "python -m pytest tests/",
+            "git status",
+            "grep -r pattern .",
+            "echo 'Hello World'",
+            "python script.py --flag=value",
+        ]
+        
+        for text in safe_cases:
+            has_idiom, _ = validator._detect_shell_idioms(text)
+            assert not has_idiom, f"Should NOT detect shell idiom in: {text}"
+
 
 class TestFeatureGoals:
     """Test feature goal creation."""
