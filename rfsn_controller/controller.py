@@ -887,6 +887,16 @@ def run_controller(cfg: ControllerConfig) -> Dict[str, Any]:
         # If fix_all mode, use unlimited steps
         max_iterations = float('inf') if cfg.fix_all else cfg.max_steps
         step = 0
+        
+        # Feature mode tracking
+        feature_subgoals = [
+            "scaffold: Create necessary file structure and boilerplate",
+            "implement: Write core functionality",
+            "tests: Add comprehensive tests",
+            "docs: Update documentation",
+        ]
+        completed_feature_subgoals = []
+        current_feature_subgoal_idx = 0
 
         while step < max_iterations:
             # Progress reporting
@@ -1055,13 +1065,18 @@ def run_controller(cfg: ControllerConfig) -> Dict[str, Any]:
             # model state = facts
             if cfg.feature_mode:
                 # Feature mode state
+                current_subgoal = (
+                    feature_subgoals[current_feature_subgoal_idx] 
+                    if current_feature_subgoal_idx < len(feature_subgoals) 
+                    else "finalize: Review and complete feature"
+                )
                 state = {
                     "mode": "feature",
                     "goal": f"Implement feature: {cfg.feature_description or 'As specified'}",
                     "feature_description": cfg.feature_description or "",
                     "acceptance_criteria": cfg.acceptance_criteria or [],
-                    "completed_subgoals": [],  # Track completed subgoals
-                    "current_subgoal": "scaffold: Create necessary file structure and boilerplate",
+                    "completed_subgoals": completed_feature_subgoals,
+                    "current_subgoal": current_subgoal,
                     "test_cmd": effective_test_cmd,
                     "focus_test_cmd": pd.focus_test_cmd,
                     "failure_output": (v.stdout or "") + "\n" + (v.stderr or ""),
@@ -1328,8 +1343,29 @@ def run_controller(cfg: ControllerConfig) -> Dict[str, Any]:
                         # Apply winner to main repo
                         apply_patch(sb, winner.diff)
                         winner_diff = winner.diff
-                        current_phase = Phase.FINAL_VERIFY
-                        break
+                        
+                        # In feature mode, progress through subgoals
+                        if cfg.feature_mode and current_feature_subgoal_idx < len(feature_subgoals):
+                            completed_subgoal = feature_subgoals[current_feature_subgoal_idx]
+                            completed_feature_subgoals.append(completed_subgoal)
+                            current_feature_subgoal_idx += 1
+                            print(f"[Step {step}] Completed subgoal: {completed_subgoal}")
+                            log({
+                                "phase": "feature_subgoal_complete",
+                                "step": step,
+                                "completed_subgoal": completed_subgoal,
+                                "remaining_subgoals": len(feature_subgoals) - current_feature_subgoal_idx,
+                            })
+                            
+                            # If all subgoals completed, check for feature completion
+                            if current_feature_subgoal_idx >= len(feature_subgoals):
+                                print(f"[Step {step}] All subgoals completed - awaiting feature summary")
+                                # Continue to next iteration to get feature_summary from model
+                            # Don't break - continue to next subgoal
+                        else:
+                            # Repair mode or feature mode complete - break to final verify
+                            current_phase = Phase.FINAL_VERIFY
+                            break
                     else:
                         print(f"[Step {step}] No patch passed verification")
                         log({"phase": "no_winner", "step": step, "attempted": len(valid_patches)})
