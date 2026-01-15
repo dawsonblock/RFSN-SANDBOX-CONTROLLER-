@@ -365,6 +365,14 @@ class ControllerConfig:
     feature_mode: bool = False
     feature_description: Optional[str] = None
     acceptance_criteria: List[str] = field(default_factory=list)
+    # Verification configuration for feature mode
+    verify_policy: str = "tests_only"  # tests_only | cmds_then_tests | cmds_only
+    focused_verify_cmds: List[str] = field(default_factory=list)
+    verify_cmds: List[str] = field(default_factory=list)
+    # Hygiene configuration overrides
+    max_lines_changed: Optional[int] = None
+    max_files_changed: Optional[int] = None
+    allow_lockfile_changes: bool = False
 
 
 def run_controller(cfg: ControllerConfig) -> Dict[str, Any]:
@@ -606,6 +614,21 @@ def run_controller(cfg: ControllerConfig) -> Dict[str, Any]:
             "setup_commands": setup_commands,
             "test_cmd": effective_test_cmd,
             "buildpack_image": selected_buildpack,
+        })
+
+        # === WIRE LANGUAGE-SCOPED ALLOWLIST ===
+        # Set sandbox allowed_commands based on detected project type
+        from .allowlist_profiles import commands_for_project
+        
+        # Build project info dict for allowlist selection, using the buildpack-derived language
+        project_info = {
+            "language": selected_buildpack_instance.buildpack_type.value if selected_buildpack_instance else None,
+        }
+        sb.allowed_commands = commands_for_project(project_info)
+        log({
+            "phase": "allowlist_configured",
+            "language": project_info["language"],
+            "num_commands": len(sb.allowed_commands),
         })
 
         # Detect QuixBugs repository structure
@@ -1277,11 +1300,37 @@ def run_controller(cfg: ControllerConfig) -> Dict[str, Any]:
                 # Validate patch hygiene
                 valid_patches: List[Tuple[str, float]] = []
                 
-                # Choose hygiene config based on mode
+                # Choose hygiene config based on mode and language
+                # Extract language from detection result
+                detected_language = None
+                if selected_buildpack_instance:
+                    detected_language = selected_buildpack_instance.buildpack_type.value
+                elif project_type:
+                    detected_language = project_type.name.lower()
+                
+                # Choose base policy based on mode
                 if cfg.feature_mode:
-                    hygiene_config = PatchHygieneConfig.for_feature_mode()
+                    hygiene_config = PatchHygieneConfig.for_feature_mode(language=detected_language)
                 else:
-                    hygiene_config = PatchHygieneConfig.for_repair_mode()
+                    hygiene_config = PatchHygieneConfig.for_repair_mode(language=detected_language)
+                
+                # Apply CLI overrides
+                if cfg.max_lines_changed is not None:
+                    hygiene_config.max_lines_changed = cfg.max_lines_changed
+                if cfg.max_files_changed is not None:
+                    hygiene_config.max_files_changed = cfg.max_files_changed
+                if cfg.allow_lockfile_changes:
+                    hygiene_config.allow_lockfile_changes = True
+                
+                log({
+                    "phase": "hygiene_policy",
+                    "step": step,
+                    "mode": "feature" if cfg.feature_mode else "repair",
+                    "language": detected_language,
+                    "max_lines": hygiene_config.max_lines_changed,
+                    "max_files": hygiene_config.max_files_changed,
+                    "allow_lockfile_changes": hygiene_config.allow_lockfile_changes,
+                })
                 
                 for diff, temp in patches_to_evaluate:
                     hygiene_result = validate_patch_hygiene(diff, hygiene_config)
@@ -1391,14 +1440,103 @@ def run_controller(cfg: ControllerConfig) -> Dict[str, Any]:
         if current_phase == Phase.FINAL_VERIFY:
             log(PhaseTransition(Phase.REPAIR_LOOP, Phase.FINAL_VERIFY).to_dict())
 
-            print("\n[FINAL_VERIFY] Running full test suite...")
-            v = _run_tests_in_sandbox(sb, effective_test_cmd, cfg, command_log, selected_buildpack, selected_buildpack_instance)
-            final_output = (v.stdout or "") + "\n" + (v.stderr or "")
+            # Track verification results
+            verification_passed = True
+            verification_results = []
+            
+            # Execute verification commands based on policy
+            run_cmd_verification = cfg.verify_policy in ("cmds_then_tests", "cmds_only")
 
-            if v.ok:
-                print("\n✅ FINAL SUCCESS! All tests passing.")
+            # 1. Focused verify commands (if any)
+            if run_cmd_verification:
+                for idx, cmd in enumerate(cfg.focused_verify_cmds):
+                    print(f"\n[FINAL_VERIFY] Running focused verification {idx+1}/{len(cfg.focused_verify_cmds)}: {cmd}")
+                    v_result = _run_tests_in_sandbox(sb, cmd, cfg, command_log, selected_buildpack, selected_buildpack_instance)
+                    verification_results.append({
+                        "type": "focused_verify",
+                        "command": cmd,
+                        "passed": v_result.ok,
+                        "exit_code": v_result.exit_code,
+                    })
+                    log({
+                        "phase": "focused_verify",
+                        "command": cmd,
+                        "passed": v_result.ok,
+                        "exit_code": v_result.exit_code,
+                    })
+                    if not v_result.ok:
+                        print("  ❌ Focused verification failed")
+                        verification_passed = False
+                    else:
+                        print("  ✅ Focused verification passed")
+
+            # 2. Regular verify commands (if any)
+            if run_cmd_verification:
+                for idx, cmd in enumerate(cfg.verify_cmds):
+                    print(f"\n[FINAL_VERIFY] Running verification {idx+1}/{len(cfg.verify_cmds)}: {cmd}")
+                    v_result = _run_tests_in_sandbox(sb, cmd, cfg, command_log, selected_buildpack, selected_buildpack_instance)
+                    verification_results.append({
+                        "type": "verify",
+                        "command": cmd,
+                        "passed": v_result.ok,
+                        "exit_code": v_result.exit_code,
+                    })
+                    log({
+                        "phase": "verify",
+                        "command": cmd,
+                        "passed": v_result.ok,
+                        "exit_code": v_result.exit_code,
+                    })
+                    if not v_result.ok:
+                        print("  ❌ Verification failed")
+                        verification_passed = False
+                    else:
+                        print("  ✅ Verification passed")
+            
+            # 3. Test command (unless policy is "cmds_only")
+            if cfg.verify_policy != "cmds_only":
+                print(f"\n[FINAL_VERIFY] Running test suite: {effective_test_cmd}")
+                v = _run_tests_in_sandbox(sb, effective_test_cmd, cfg, command_log, selected_buildpack, selected_buildpack_instance)
+                final_output = (v.stdout or "") + "\n" + (v.stderr or "")
+                verification_results.append({
+                    "type": "tests",
+                    "command": effective_test_cmd,
+                    "passed": v.ok,
+                    "exit_code": v.exit_code,
+                })
+                log({
+                    "phase": "test_verify",
+                    "command": effective_test_cmd,
+                    "passed": v.ok,
+                    "exit_code": v.exit_code,
+                })
+                if not v.ok:
+                    print(f"  ❌ Tests failed: {len(v.failing_tests)} failing tests")
+                    verification_passed = False
+                v = VerifyResult(
             else:
-                print(f"\n⚠️  Final verify failed: {len(v.failing_tests)} failing tests")
+                # For cmds_only policy, create a placeholder result
+                v = VerifyResult(ok=verification_passed, exit_code=0, stdout="", stderr="", failing_tests=[], sig="")
+                v = VerifyResult(
+                    ok=verification_passed,
+                    exit_code=0 if verification_passed else 1,
+                    stdout="",
+                    stderr="",
+                    failing_tests=[],
+                    sig="",
+                )
+
+            # Overall verification result
+            log({
+                "phase": "final_verify_complete",
+                "verification_passed": verification_passed,
+                "verification_results": verification_results,
+            })
+            
+            if verification_passed:
+                print("\n✅ FINAL SUCCESS! All verifications passed.")
+            else:
+                print(f"\n⚠️  Final verify failed")
                 current_phase = Phase.BAILOUT
 
         # === PHASE: EVIDENCE_PACK ===

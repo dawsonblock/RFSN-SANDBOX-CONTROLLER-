@@ -22,6 +22,7 @@ class PatchHygieneConfig:
         max_files_changed: int = 5,
         allow_test_deletion: bool = False,
         allow_test_modification: bool = False,
+        allow_lockfile_changes: bool = False,
         language: Optional[str] = None,
     ):
         self.max_lines_changed = max_lines_changed
@@ -31,6 +32,7 @@ class PatchHygieneConfig:
         self.forbidden_file_patterns = self._default_forbidden_patterns()
         self.allow_test_deletion = allow_test_deletion
         self.allow_test_modification = allow_test_modification
+        self.allow_lockfile_changes = allow_lockfile_changes
         self.language = language
     
     @classmethod
@@ -42,6 +44,7 @@ class PatchHygieneConfig:
         - Max 5 files changed
         - No test deletion
         - No test modification
+        - No lockfile changes
         
         Args:
             language: Optional language for language-specific adjustments.
@@ -51,6 +54,7 @@ class PatchHygieneConfig:
             max_files_changed=5,
             allow_test_deletion=False,
             allow_test_modification=False,
+            allow_lockfile_changes=False,
             language=language,
         )
     
@@ -63,6 +67,7 @@ class PatchHygieneConfig:
         - Max 15 files changed (allows multi-module features)
         - Allows test creation and modification
         - No test deletion (tests are deliverables)
+        - No lockfile changes by default (must be explicitly allowed)
         
         Language-specific adjustments:
         - Java/C#: +200 lines (boilerplate-heavy)
@@ -85,6 +90,7 @@ class PatchHygieneConfig:
             max_files_changed=max_files,
             allow_test_deletion=False,
             allow_test_modification=True,
+            allow_lockfile_changes=False,
             language=language,
         )
     
@@ -95,6 +101,7 @@ class PatchHygieneConfig:
         max_files_changed: int,
         allow_test_deletion: bool = False,
         allow_test_modification: bool = False,
+        allow_lockfile_changes: bool = False,
         language: Optional[str] = None,
     ) -> 'PatchHygieneConfig':
         """Create a custom configuration with specific thresholds.
@@ -107,6 +114,7 @@ class PatchHygieneConfig:
             max_files_changed: Maximum files that can be changed.
             allow_test_deletion: Whether to allow test file deletion.
             allow_test_modification: Whether to allow test file modification.
+            allow_lockfile_changes: Whether to allow lockfile changes.
             language: Optional language identifier.
         """
         return cls(
@@ -114,6 +122,7 @@ class PatchHygieneConfig:
             max_files_changed=max_files_changed,
             allow_test_deletion=allow_test_deletion,
             allow_test_modification=allow_test_modification,
+            allow_lockfile_changes=allow_lockfile_changes,
             language=language,
         )
     
@@ -212,9 +221,33 @@ def validate_patch_hygiene(
             if filepath.startswith(forbidden_dir):
                 violations.append(f"Cannot modify files in {forbidden_dir}: {filepath}")
     
-    # Check forbidden file patterns
+    # Define lockfile patterns
+    # Note: This includes both explicit well-known lockfiles and any file ending in .lock
+    # This intentionally covers custom lockfiles (e.g., custom-name.lock) to prevent
+    # unintended dependency changes. If a .lock file should be modifiable, it should not
+    # be named with the .lock extension.
+    lockfile_patterns = {
+        'package-lock.json',
+        'yarn.lock',
+        'pnpm-lock.yaml',
+        'poetry.lock',
+        'Pipfile.lock',
+        'requirements.lock',
+        'Cargo.lock',
+        'go.sum',
+    }
+    
+    # Check forbidden file patterns (excluding lockfiles if allowed)
     for filepath in files_changed:
         filename = filepath.split('/')[-1]
+        
+        # Check if this is a lockfile (explicit patterns OR any .lock file)
+        is_lockfile = filename in lockfile_patterns or filename.endswith('.lock')
+        
+        # If lockfile changes are allowed, skip lockfile pattern checks
+        if is_lockfile and config.allow_lockfile_changes:
+            continue
+        
         for pattern in config.forbidden_file_patterns:
             if pattern.startswith('*'):
                 # Wildcard pattern
