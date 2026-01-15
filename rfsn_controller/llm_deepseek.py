@@ -126,7 +126,7 @@ You must follow this sequence unless evidence already exists:
    - What is the smallest correct change?
    - What verification will prove it works?
 
-   This plan must appear in the "why" field of your next action.
+   This plan must appear in the "why" field of your next tool_request.
 
 4) Implement
    - Produce a focused patch.

@@ -170,11 +170,17 @@ class TestPromptStructure:
     def test_gemini_prompt_length_reasonable(self):
         """Test that Gemini prompt length is reasonable (not too short or too long)."""
         # Should be comprehensive but not excessive
+        # Lower bound: Must contain all sections (>5000 chars)
+        # Upper bound: Should not exceed 15000 chars to avoid excessive token usage
+        # This allows ~2-3x the old prompt length while preventing bloat
         assert 5000 < len(GEMINI_SYSTEM) < 15000, f"Prompt length: {len(GEMINI_SYSTEM)}"
 
     def test_deepseek_prompt_length_reasonable(self):
         """Test that DeepSeek prompt length is reasonable (not too short or too long)."""
         # Should be comprehensive but not excessive
+        # Lower bound: Must contain all sections (>5000 chars)
+        # Upper bound: Should not exceed 15000 chars to avoid excessive token usage
+        # This allows ~2-3x the old prompt length while preventing bloat
         assert 5000 < len(DEEPSEEK_SYSTEM) < 15000, f"Prompt length: {len(DEEPSEEK_SYSTEM)}"
 
     def test_prompts_are_similar_but_not_identical(self):
@@ -187,6 +193,8 @@ class TestPromptStructure:
         assert "OUTPUT FORMAT" in DEEPSEEK_SYSTEM
         
         # Length should be similar but not identical
+        # DeepSeek has additional OUTPUT FORMAT section (~300-400 chars)
+        # Allow up to 1000 chars difference to accommodate model-specific variations
         length_diff = abs(len(GEMINI_SYSTEM) - len(DEEPSEEK_SYSTEM))
         assert length_diff < 1000, f"Prompt lengths too different: {length_diff}"
 
@@ -206,12 +214,13 @@ class TestPromptSemantics:
 
     def test_gemini_prompt_forbids_guessing(self):
         """Test that Gemini prompt forbids guessing."""
-        assert "Never guess" in GEMINI_SYSTEM or "Do not guess" in GEMINI_SYSTEM
+        # Should explicitly forbid guessing in tool_request rules
+        assert "Never guess when the answer is in the repo" in GEMINI_SYSTEM
 
     def test_deepseek_prompt_forbids_guessing(self):
         """Test that DeepSeek prompt forbids guessing."""
-        # Check in the workflow section
-        assert "Do not guess" in DEEPSEEK_SYSTEM or "never guess" in DEEPSEEK_SYSTEM.lower()
+        # Should explicitly forbid guessing in tool_request rules
+        assert "Never guess when the answer is in the repo" in DEEPSEEK_SYSTEM
 
     def test_gemini_prompt_requires_verification(self):
         """Test that Gemini prompt requires verification."""
