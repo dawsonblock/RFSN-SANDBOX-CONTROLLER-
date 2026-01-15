@@ -166,6 +166,14 @@ class ModelOutputValidator:
             # Check command arguments for shell idioms
             if tool == "sandbox.run" and "cmd" in args:
                 cmd = args["cmd"]
+                if not isinstance(cmd, str):
+                    return ModelOutput(
+                        mode="tool_request",
+                        requests=[],
+                        why="Invalid sandbox.run request: 'cmd' must be a string (single command).",
+                        is_valid=False,
+                        validation_error=f"Request {i} has non-string cmd",
+                    )
                 has_idiom, idiom_desc = self._detect_shell_idioms(cmd)
                 if has_idiom:
                     # Provide corrective feedback
