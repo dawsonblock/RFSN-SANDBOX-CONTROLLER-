@@ -174,6 +174,17 @@ class ModelOutputValidator:
                         is_valid=False,
                         validation_error=f"Request {i} has non-string cmd",
                     )
+                if "\n" in cmd or "\r" in cmd:
+                    return ModelOutput(
+                        mode="tool_request",
+                        requests=[{"tool": "sandbox.read_file", "args": {"path": "README.md"}}],
+                        why=(
+                            "Invalid sandbox.run request: commands must be a single line because the sandbox runs "
+                            "with shell=False. Please split multi-step workflows into multiple tool requests."
+                        ),
+                        is_valid=False,
+                        validation_error=f"Shell idiom in request {i}: newline in command",
+                    )
                 has_idiom, idiom_desc = self._detect_shell_idioms(cmd)
                 if has_idiom:
                     # Provide corrective feedback
