@@ -1513,10 +1513,10 @@ def run_controller(cfg: ControllerConfig) -> Dict[str, Any]:
                 if not v.ok:
                     print(f"  ❌ Tests failed: {len(v.failing_tests)} failing tests")
                     verification_passed = False
-                v = VerifyResult(
+                else:
+                    print("  ✅ Tests passed")
             else:
                 # For cmds_only policy, create a placeholder result
-                v = VerifyResult(ok=verification_passed, exit_code=0, stdout="", stderr="", failing_tests=[], sig="")
                 v = VerifyResult(
                     ok=verification_passed,
                     exit_code=0 if verification_passed else 1,
@@ -1525,6 +1525,7 @@ def run_controller(cfg: ControllerConfig) -> Dict[str, Any]:
                     failing_tests=[],
                     sig="",
                 )
+                final_output = ""
 
             # Overall verification result
             log({
