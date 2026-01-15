@@ -79,7 +79,7 @@ Format:
 {
   "mode": "feature_summary",
   "summary": "What was built, how it works, and where it lives in the repo.",
-  "completion_status": "complete | partial | blocked | in_progress"
+  "completion_status": "<one of: 'complete', 'partial', 'blocked', 'in_progress'>"
 }
 
 Rules:
