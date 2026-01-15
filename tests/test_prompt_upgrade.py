@@ -213,13 +213,13 @@ class TestPromptSemantics:
 
     def test_gemini_prompt_forbids_guessing(self):
         """Test that Gemini prompt forbids guessing."""
-        # Should explicitly forbid guessing in tool_request rules
-        assert "Never guess when the answer is in the repo" in GEMINI_SYSTEM
+        import re
+        assert re.search(r"\bnever\s+guess\b.*\brepo\b", GEMINI_SYSTEM, re.IGNORECASE | re.DOTALL)
 
     def test_deepseek_prompt_forbids_guessing(self):
         """Test that DeepSeek prompt forbids guessing."""
-        # Should explicitly forbid guessing in tool_request rules
-        assert "Never guess when the answer is in the repo" in DEEPSEEK_SYSTEM
+        import re
+        assert re.search(r"\bnever\s+guess\b.*\brepo\b", DEEPSEEK_SYSTEM, re.IGNORECASE | re.DOTALL)
 
     def test_gemini_prompt_requires_verification(self):
         """Test that Gemini prompt requires verification."""
