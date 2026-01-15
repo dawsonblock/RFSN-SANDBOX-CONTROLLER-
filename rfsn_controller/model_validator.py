@@ -174,6 +174,7 @@ class ModelOutputValidator:
                         is_valid=False,
                         validation_error=f"Request {i} has non-string cmd",
                     )
+                cmd = cmd.strip()
                 if "\n" in cmd or "\r" in cmd:
                     return ModelOutput(
                         mode="tool_request",
