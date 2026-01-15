@@ -172,13 +172,14 @@ class ModelOutputValidator:
                     corrective_why = (
                         f"Invalid command due to shell idiom: {idiom_desc}. "
                         f"The sandbox runs commands with shell=False, so shell features are not supported. "
-                        f"You must correct this. Split compound commands into separate tool_request calls. "
-                        f"Use explicit paths instead of 'cd'. "
-                        f"Use config files or flags instead of inline environment variables."
+                        f"Please re-issue a new tool_request with a single direct command per request. "
+                        f"Split compound commands into separate requests, use explicit paths instead of 'cd', "
+                        f"and avoid inline env assignments (prefer flags or config). "
+                        f"Example: bad='npm install && npm test' -> good: two requests: 'npm install' then 'npm test'."
                     )
                     return ModelOutput(
                         mode="tool_request",
-                        requests=[],
+                        requests=[{"tool": "sandbox.read_file", "args": {"path": "README.md"}}],
                         why=corrective_why,
                         is_valid=False,
                         validation_error=f"Shell idiom in request {i}: {idiom_desc}",
