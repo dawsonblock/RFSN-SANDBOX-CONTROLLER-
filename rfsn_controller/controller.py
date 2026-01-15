@@ -1617,10 +1617,9 @@ def run_controller(cfg: ControllerConfig) -> Dict[str, Any]:
                             "total_verification_attempts": total_verification_attempts,
                         })
                         verification_passed = False
-                        # Set v and final_output if not already set
-                        if run_idx == 0:
-                            v = VerifyResult(ok=False, exit_code=1, stdout="", stderr="Budget exhausted", failing_tests=[], sig="")
-                            final_output = "Budget exhausted"
+                        # Set v and final_output to reflect budget exhaustion
+                        v = VerifyResult(ok=False, exit_code=1, stdout="", stderr="Budget exhausted", failing_tests=[], sig="")
+                        final_output = "Budget exhausted"
                         break
                     
                     if repro_times > 1:
