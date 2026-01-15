@@ -66,7 +66,7 @@ ALLOWED_COMMANDS: Set[str] = {
     "rake",
     "rspec",
     
-    # Unix utilities
+    # Unix utilities (no cd - commands run from repo root)
     "cat",
     "head",
     "tail",
@@ -95,6 +95,7 @@ ALLOWED_COMMANDS: Set[str] = {
 
 # Commands that are explicitly blocked
 BLOCKED_COMMANDS: Set[str] = {
+    "cd",  # Commands run from repo root; cd is not needed and causes confusion
     "curl",
     "wget",
     "ssh",
@@ -170,6 +171,10 @@ def is_command_allowed(command: str) -> tuple[bool, Optional[str]]:
         return False, "Empty command"
 
     base_cmd = parts[0]
+
+    # Check for cd command (base command or inline usage)
+    if base_cmd == "cd" or " cd " in command or command.startswith("cd "):
+        return False, "cd command is blocked - commands run from repo root"
 
     # Check if command is explicitly blocked
     if base_cmd in BLOCKED_COMMANDS:

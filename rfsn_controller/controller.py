@@ -608,6 +608,22 @@ def run_controller(cfg: ControllerConfig) -> Dict[str, Any]:
             "buildpack_image": selected_buildpack,
         })
 
+        # === WIRE LANGUAGE-SCOPED ALLOWLIST ===
+        # Set sandbox allowed_commands based on detected project type
+        from .allowlist_profiles import commands_for_project
+        
+        # Build project info dict for allowlist selection
+        project_info = {
+            "language": selected_buildpack_instance.buildpack_type.value if selected_buildpack_instance else None,
+            "project_type": project_type.name if project_type else None,
+        }
+        sb.allowed_commands = commands_for_project(project_info)
+        log({
+            "phase": "allowlist_configured",
+            "language": project_info["language"],
+            "num_commands": len(sb.allowed_commands),
+        })
+
         # Detect QuixBugs repository structure
         is_quixbugs = "python_testcases/" in repo_tree_text and "python_programs/" in repo_tree_text
 

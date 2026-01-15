@@ -15,7 +15,7 @@ import tempfile
 import threading
 from itertools import count
 from dataclasses import dataclass
-from typing import Dict, Any, Tuple, List, Optional
+from typing import Dict, Any, Tuple, List, Optional, Set
 import shlex
 
 from .command_allowlist import is_command_allowed
@@ -38,24 +38,26 @@ class Sandbox:
     root: str  # root directory of the sandbox
     repo_dir: str  # path to the cloned repository within the sandbox
     worktree_counter: int = 0
+    allowed_commands: Optional[Set[str]] = None  # Language-specific command allowlist
 
 
 _SANDBOX_COUNTER = count(1)
 _WORKTREE_COUNTER_LOCK = threading.Lock()
 
 
-def _run(cmd: str, cwd: str, timeout_sec: int = 120) -> Tuple[int, str, str]:
+def _run(cmd: str, cwd: str, timeout_sec: int = 120, allowed_commands: Optional[Set[str]] = None) -> Tuple[int, str, str]:
     """Run a shell command and capture its output.
 
     Args:
         cmd: The command to run.
         cwd: Working directory.
         timeout_sec: Timeout for the command.
+        allowed_commands: Optional set of allowed command names. If provided, only these commands are allowed.
 
     Returns:
         A tuple of (exit_code, stdout, stderr).
     """
-    # Check if command is allowed
+    # Check if command is allowed by global security policy
     is_allowed, reason = is_command_allowed(cmd)
     if not is_allowed:
         return 1, "", f"Command blocked by security policy: {reason}"
@@ -66,6 +68,12 @@ def _run(cmd: str, cwd: str, timeout_sec: int = 120) -> Tuple[int, str, str]:
         cmd_list = shlex.split(cmd)
     except ValueError as e:
         return 1, "", f"Command parsing error: {e}"
+
+    # Check against language-specific allowlist if provided
+    if allowed_commands is not None and cmd_list:
+        base_cmd = cmd_list[0]
+        if base_cmd not in allowed_commands:
+            return 1, "", f"Command '{base_cmd}' not allowed for this project type. Allowed commands: {sorted(allowed_commands)[:10]}..."
 
     p = subprocess.run(
         cmd_list,
@@ -133,26 +141,26 @@ def clone_public_github(sb: Sandbox, github_url: str) -> Dict[str, Any]:
         return {"ok": True, "note": "Repo already cloned."}
 
     parent = os.path.dirname(sb.repo_dir)
-    code, out, err = _run(f"git clone {github_url} {sb.repo_dir}", cwd=parent, timeout_sec=600)
+    code, out, err = _run(f"git clone {github_url} {sb.repo_dir}", cwd=parent, timeout_sec=600, allowed_commands=sb.allowed_commands)
     return {"ok": code == 0, "exit_code": code, "stdout": out, "stderr": err}
 
 
 def checkout(sb: Sandbox, ref: str) -> Dict[str, Any]:
     """Check out a specific git ref inside the sandboxed repository."""
-    code, out, err = _run(f"git checkout {ref}", cwd=sb.repo_dir, timeout_sec=120)
+    code, out, err = _run(f"git checkout {ref}", cwd=sb.repo_dir, timeout_sec=120, allowed_commands=sb.allowed_commands)
     return {"ok": code == 0, "exit_code": code, "stdout": out, "stderr": err}
 
 
 def git_status(sb: Sandbox) -> Dict[str, Any]:
     """Get a porcelain status of the repository."""
-    code, out, err = _run("git status --porcelain=v1", cwd=sb.repo_dir, timeout_sec=60)
+    code, out, err = _run("git status --porcelain=v1", cwd=sb.repo_dir, timeout_sec=60, allowed_commands=sb.allowed_commands)
     return {"ok": code == 0, "exit_code": code, "stdout": out, "stderr": err}
 
 
 def reset_hard(sb: Sandbox) -> Dict[str, Any]:
     """Reset any changes and clean untracked files in the repository."""
-    c1, o1, e1 = _run("git reset --hard", cwd=sb.repo_dir, timeout_sec=120)
-    c2, o2, e2 = _run("git clean -fd", cwd=sb.repo_dir, timeout_sec=120)
+    c1, o1, e1 = _run("git reset --hard", cwd=sb.repo_dir, timeout_sec=120, allowed_commands=sb.allowed_commands)
+    c2, o2, e2 = _run("git clean -fd", cwd=sb.repo_dir, timeout_sec=120, allowed_commands=sb.allowed_commands)
     ok = (c1 == 0 and c2 == 0)
     return {"ok": ok, "stdout": o1 + o2, "stderr": e1 + e2}
 
@@ -260,7 +268,7 @@ def pip_install(sb: Sandbox, packages: str, timeout_sec: int = 300) -> Dict[str,
     venv_pip = os.path.join(sb.repo_dir, ".venv", "bin", "pip")
     pip_cmd = venv_pip if os.path.exists(venv_pip) else "pip"
     cmd = f"{pip_cmd} install {packages}"
-    code, out, err = _run(cmd, cwd=sb.repo_dir, timeout_sec=timeout_sec)
+    code, out, err = _run(cmd, cwd=sb.repo_dir, timeout_sec=timeout_sec, allowed_commands=sb.allowed_commands)
     return {"ok": code == 0, "exit_code": code, "stdout": out, "stderr": err}
 
 
@@ -282,7 +290,7 @@ def pip_install_requirements(sb: Sandbox, requirements_file: str = "requirements
     venv_pip = os.path.join(sb.repo_dir, ".venv", "bin", "pip")
     pip_cmd = venv_pip if os.path.exists(venv_pip) else "pip"
     cmd = f"{pip_cmd} install -r {requirements_file}"
-    code, out, err = _run(cmd, cwd=sb.repo_dir, timeout_sec=timeout_sec)
+    code, out, err = _run(cmd, cwd=sb.repo_dir, timeout_sec=timeout_sec, allowed_commands=sb.allowed_commands)
     return {"ok": code == 0, "exit_code": code, "stdout": out, "stderr": err}
 
 
@@ -301,7 +309,7 @@ def create_venv(sb: Sandbox, venv_path: str = ".venv", timeout_sec: int = 60) ->
     if os.path.exists(full_path):
         return {"ok": True, "note": f"Virtual environment already exists at {venv_path}"}
     cmd = f"python -m venv {venv_path}"
-    code, out, err = _run(cmd, cwd=sb.repo_dir, timeout_sec=timeout_sec)
+    code, out, err = _run(cmd, cwd=sb.repo_dir, timeout_sec=timeout_sec, allowed_commands=sb.allowed_commands)
     return {"ok": code == 0, "exit_code": code, "stdout": out, "stderr": err}
 
 
@@ -331,7 +339,7 @@ def pip_install_progressive(sb: Sandbox, packages: str, timeout_sec: int = 300) 
 
     for pkg in package_list:
         cmd = f"{pip_cmd} install {pkg}"
-        code, out, err = _run(cmd, cwd=sb.repo_dir, timeout_sec=timeout_sec)
+        code, out, err = _run(cmd, cwd=sb.repo_dir, timeout_sec=timeout_sec, allowed_commands=sb.allowed_commands)
         pkg_result = {
             "package": pkg,
             "ok": code == 0,
@@ -377,7 +385,7 @@ def find_local_module(sb: Sandbox, module_name: str) -> Dict[str, Any]:
 
     found_paths = []
     for variation in module_variations:
-        code, out, err = _run(f"find . -name '{variation}' -type f 2>/dev/null", cwd=sb.repo_dir, timeout_sec=30)
+        code, out, err = _run(f"find . -name '{variation}' -type f 2>/dev/null", cwd=sb.repo_dir, timeout_sec=30, allowed_commands=sb.allowed_commands)
         if code == 0 and out.strip():
             for line in out.strip().splitlines():
                 if line and not line.startswith("."):
@@ -406,7 +414,7 @@ def set_pythonpath(sb: Sandbox, path: str = "") -> Dict[str, Any]:
     if not path:
         path = sb.repo_dir
     cmd = f"export PYTHONPATH={path}:$PYTHONPATH && echo $PYTHONPATH"
-    code, out, err = _run(cmd, cwd=sb.repo_dir, timeout_sec=10)
+    code, out, err = _run(cmd, cwd=sb.repo_dir, timeout_sec=10, allowed_commands=sb.allowed_commands)
     return {
         "ok": code == 0,
         "pythonpath": out.strip() if code == 0 else path,
@@ -420,14 +428,14 @@ def grep(sb: Sandbox, query: str, max_matches: int = 200) -> Dict[str, Any]:
     query = query.replace("\n", " ")
     # Escape single quotes in query for shell safety
     query_escaped = query.replace("'", "'\\''")
-    code, out, err = _run(f"grep -R --line-number '{query_escaped}' .", cwd=sb.repo_dir, timeout_sec=60)
+    code, out, err = _run(f"grep -R --line-number '{query_escaped}' .", cwd=sb.repo_dir, timeout_sec=60, allowed_commands=sb.allowed_commands)
     lines = (out + err).splitlines()[:max_matches]
     return {"ok": True, "matches": lines}
 
 
 def run_cmd(sb: Sandbox, cmd: str, timeout_sec: int = 120) -> Dict[str, Any]:
     """Run an arbitrary shell command inside the repository."""
-    code, out, err = _run(cmd, cwd=sb.repo_dir, timeout_sec=timeout_sec)
+    code, out, err = _run(cmd, cwd=sb.repo_dir, timeout_sec=timeout_sec, allowed_commands=sb.allowed_commands)
     return {"ok": code == 0, "exit_code": code, "stdout": out, "stderr": err}
 
 
@@ -465,6 +473,7 @@ def make_worktree(sb: Sandbox, *, suffix: Optional[str] = None) -> str:
         f"git worktree add --detach {wt_escaped}",
         cwd=sb.repo_dir,
         timeout_sec=60,
+        allowed_commands=sb.allowed_commands,
     )
     if code != 0:
         raise RuntimeError(f"worktree add failed: {err}\n{out}")
@@ -478,6 +487,7 @@ def drop_worktree(sb: Sandbox, wt_dir: str) -> None:
         f"git worktree remove --force {wt_escaped}",
         cwd=sb.repo_dir,
         timeout_sec=60,
+        allowed_commands=sb.allowed_commands,
     )
     if os.path.exists(wt_dir):
         shutil.rmtree(wt_dir, ignore_errors=True)
