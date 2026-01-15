@@ -620,10 +620,9 @@ def run_controller(cfg: ControllerConfig) -> Dict[str, Any]:
         # Set sandbox allowed_commands based on detected project type
         from .allowlist_profiles import commands_for_project
         
-        # Build project info dict for allowlist selection
+        # Build project info dict for allowlist selection, using the buildpack-derived language
         project_info = {
             "language": selected_buildpack_instance.buildpack_type.value if selected_buildpack_instance else None,
-            "project_type": project_type.name if project_type else None,
         }
         sb.allowed_commands = commands_for_project(project_info)
         log({
