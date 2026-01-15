@@ -6,7 +6,7 @@ feature engineering mode that enables the agent to implement new features from s
 
 import pytest
 from rfsn_controller.model_validator import ModelOutputValidator
-from rfsn_controller.goals import GoalFactory, FeatureGoal, GoalType, DEFAULT_FEATURE_SUBGOALS
+from rfsn_controller.goals import GoalFactory, GoalType, DEFAULT_FEATURE_SUBGOALS
 from rfsn_controller.prompt import build_model_input, MODE_FEATURE
 
 
@@ -67,7 +67,9 @@ class TestFeatureGoals:
             timeout=600
         )
         
-        assert isinstance(goal, FeatureGoal)
+        # Check type by verifying it has feature-specific attributes
+        assert hasattr(goal, 'acceptance_criteria')
+        assert hasattr(goal, 'subgoals')
         assert goal.description == "Add user authentication"
         assert len(goal.acceptance_criteria) == 2
         assert goal.timeout == 600

@@ -4,7 +4,6 @@ from typing import Dict, Any
 
 # Mode constants
 MODE_FEATURE = "feature"
-MODE_REPAIR = "repair"
 
 
 def _truncate(s: str, n: int) -> str:

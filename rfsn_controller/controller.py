@@ -1340,12 +1340,13 @@ def run_controller(cfg: ControllerConfig) -> Dict[str, Any]:
                         apply_patch(sb, winner.diff)
                         winner_diff = winner.diff
                         
-                        # In feature mode, progress through subgoals
+                        # In feature mode, progress through subgoals ONLY if patch is successful
+                        # The winner patch passed verification, so we can mark current subgoal as complete
                         if cfg.feature_mode and current_feature_subgoal_idx < len(feature_subgoals):
                             completed_subgoal = feature_subgoals[current_feature_subgoal_idx]
                             completed_feature_subgoals.append(completed_subgoal)
                             current_feature_subgoal_idx += 1
-                            print(f"[Step {step}] Completed subgoal: {completed_subgoal}")
+                            print(f"[Step {step}] ✓ Completed subgoal: {completed_subgoal}")
                             log({
                                 "phase": "feature_subgoal_complete",
                                 "step": step,
