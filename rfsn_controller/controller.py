@@ -46,7 +46,7 @@ from .patch_hygiene import validate_patch_hygiene, PatchHygieneConfig
 from .tool_manager import ToolRequestManager, ToolRequestConfig
 from .verifier import run_tests, VerifyResult
 from .policy import choose_policy
-from .prompt import build_model_input
+from .prompt import build_model_input, MODE_FEATURE
 from .llm_gemini import call_model as call_gemini
 from .llm_deepseek import call_model as call_deepseek
 from .parsers import normalize_test_path, parse_trace_files
@@ -75,6 +75,7 @@ from .buildpacks import (
     BuildpackType,
 )
 from .clock import FrozenClock, SystemClock, make_run_id, parse_utc_iso
+from .goals import DEFAULT_FEATURE_SUBGOALS
 
 
 def get_model_client(model_name: str):
@@ -889,12 +890,7 @@ def run_controller(cfg: ControllerConfig) -> Dict[str, Any]:
         step = 0
         
         # Feature mode tracking
-        feature_subgoals = [
-            "scaffold: Create necessary file structure and boilerplate",
-            "implement: Write core functionality",
-            "tests: Add comprehensive tests",
-            "docs: Update documentation",
-        ]
+        feature_subgoals = list(DEFAULT_FEATURE_SUBGOALS)
         completed_feature_subgoals = []
         current_feature_subgoal_idx = 0
 
@@ -1071,7 +1067,7 @@ def run_controller(cfg: ControllerConfig) -> Dict[str, Any]:
                     else "finalize: Review and complete feature"
                 )
                 state = {
-                    "mode": "feature",
+                    "mode": MODE_FEATURE,
                     "goal": f"Implement feature: {cfg.feature_description or 'As specified'}",
                     "feature_description": cfg.feature_description or "",
                     "acceptance_criteria": cfg.acceptance_criteria or [],

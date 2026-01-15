@@ -2,6 +2,10 @@
 
 from typing import Dict, Any
 
+# Mode constants
+MODE_FEATURE = "feature"
+MODE_REPAIR = "repair"
+
 
 def _truncate(s: str, n: int) -> str:
     """Truncate a string to at most n characters, appending a marker if truncated."""
@@ -26,7 +30,7 @@ def build_model_input(state: Dict[str, Any]) -> str:
         A single string with sections separated by headers.
     """
     # Check if this is feature mode
-    is_feature_mode = state.get('mode') == 'feature'
+    is_feature_mode = state.get('mode') == MODE_FEATURE
     
     sections = [
         f"GOAL:\n{state['goal']}\n\n",

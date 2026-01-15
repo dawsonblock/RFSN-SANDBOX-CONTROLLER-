@@ -1,9 +1,13 @@
-"""Tests for feature mode functionality."""
+"""Tests for feature mode functionality.
+
+Tests model validation, goal creation, prompt building, and feature workflow for the
+feature engineering mode that enables the agent to implement new features from scratch.
+"""
 
 import pytest
 from rfsn_controller.model_validator import ModelOutputValidator
-from rfsn_controller.goals import GoalFactory, FeatureGoal, GoalType
-from rfsn_controller.prompt import build_model_input
+from rfsn_controller.goals import GoalFactory, FeatureGoal, GoalType, DEFAULT_FEATURE_SUBGOALS
+from rfsn_controller.prompt import build_model_input, MODE_FEATURE
 
 
 class TestModelValidator:
@@ -76,6 +80,8 @@ class TestFeatureGoals:
             acceptance_criteria=["Must work"]
         )
         
+        # Should match the centralized constant
+        assert goal.subgoals == DEFAULT_FEATURE_SUBGOALS
         assert "scaffold" in goal.subgoals[0]
         assert "implement" in goal.subgoals[1]
         assert "tests" in goal.subgoals[2]
@@ -88,7 +94,7 @@ class TestPromptBuilding:
     def test_build_feature_mode_prompt(self):
         """Test building prompt in feature mode."""
         state = {
-            "mode": "feature",
+            "mode": MODE_FEATURE,
             "goal": "Implement feature: User authentication",
             "feature_description": "Add login/logout functionality",
             "acceptance_criteria": ["Users can log in", "Sessions persist"],

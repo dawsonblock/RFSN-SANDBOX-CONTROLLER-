@@ -1,11 +1,20 @@
 """Enhanced goal types beyond just tests.
 
-Supports multiple goal types: tests, build, lint, repro, static check.
+Supports multiple goal types: tests, build, lint, repro, static check, feature.
 """
 
 from dataclasses import dataclass
 from typing import Optional, List
 from enum import Enum
+
+
+# Default feature subgoals (used by both FeatureGoal and controller)
+DEFAULT_FEATURE_SUBGOALS = [
+    "scaffold: Create necessary file structure and boilerplate",
+    "implement: Write core functionality",
+    "tests: Add comprehensive tests",
+    "docs: Update documentation",
+]
 
 
 class GoalType(Enum):
@@ -44,12 +53,7 @@ class FeatureGoal:
     def __post_init__(self):
         """Initialize default subgoals if not provided."""
         if self.subgoals is None:
-            self.subgoals = [
-                "scaffold: Create necessary file structure and boilerplate",
-                "implement: Write core functionality",
-                "tests: Add comprehensive tests",
-                "docs: Update documentation",
-            ]
+            self.subgoals = DEFAULT_FEATURE_SUBGOALS
 
 
 class GoalFactory:
