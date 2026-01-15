@@ -32,8 +32,19 @@ def detect_shell_idioms(cmd: str) -> bool:
         return True
     
     # Check for pipes and redirects
-    if "|" in cmd or ">" in cmd or "<" in cmd:
-        return True
+    try:
+        tokens = shlex.split(cmd)
+    except ValueError:
+        tokens = []
+
+    # If tokenization worked, look for actual operator tokens (not characters inside quotes)
+    if tokens:
+        if any(t in {"|", ">", "<", ">>"} for t in tokens):
+            return True
+    else:
+        # Fallback heuristic
+        if "|" in cmd or ">" in cmd or "<" in cmd:
+            return True
     
     # Check for command substitution
     if "$(" in cmd or "`" in cmd:
