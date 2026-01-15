@@ -365,6 +365,14 @@ class ControllerConfig:
     feature_mode: bool = False
     feature_description: Optional[str] = None
     acceptance_criteria: List[str] = field(default_factory=list)
+    # Verification configuration for feature mode
+    verify_policy: str = "tests_only"  # tests_only | cmds_then_tests | cmds_only
+    focused_verify_cmds: List[str] = field(default_factory=list)
+    verify_cmds: List[str] = field(default_factory=list)
+    # Hygiene configuration overrides
+    max_lines_changed: Optional[int] = None
+    max_files_changed: Optional[int] = None
+    allow_lockfile_changes: bool = False
 
 
 def run_controller(cfg: ControllerConfig) -> Dict[str, Any]:
@@ -1293,11 +1301,37 @@ def run_controller(cfg: ControllerConfig) -> Dict[str, Any]:
                 # Validate patch hygiene
                 valid_patches: List[Tuple[str, float]] = []
                 
-                # Choose hygiene config based on mode
+                # Choose hygiene config based on mode and language
+                # Extract language from detection result
+                detected_language = None
+                if selected_buildpack_instance:
+                    detected_language = selected_buildpack_instance.buildpack_type.value
+                elif project_type:
+                    detected_language = project_type.name.lower()
+                
+                # Choose base policy based on mode
                 if cfg.feature_mode:
-                    hygiene_config = PatchHygieneConfig.for_feature_mode()
+                    hygiene_config = PatchHygieneConfig.for_feature_mode(language=detected_language)
                 else:
-                    hygiene_config = PatchHygieneConfig.for_repair_mode()
+                    hygiene_config = PatchHygieneConfig.for_repair_mode(language=detected_language)
+                
+                # Apply CLI overrides
+                if cfg.max_lines_changed is not None:
+                    hygiene_config.max_lines_changed = cfg.max_lines_changed
+                if cfg.max_files_changed is not None:
+                    hygiene_config.max_files_changed = cfg.max_files_changed
+                if cfg.allow_lockfile_changes:
+                    hygiene_config.allow_lockfile_changes = True
+                
+                log({
+                    "phase": "hygiene_policy",
+                    "step": step,
+                    "mode": "feature" if cfg.feature_mode else "repair",
+                    "language": detected_language,
+                    "max_lines": hygiene_config.max_lines_changed,
+                    "max_files": hygiene_config.max_files_changed,
+                    "allow_lockfile_changes": hygiene_config.allow_lockfile_changes,
+                })
                 
                 for diff, temp in patches_to_evaluate:
                     hygiene_result = validate_patch_hygiene(diff, hygiene_config)

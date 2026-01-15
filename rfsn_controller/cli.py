@@ -262,6 +262,41 @@ def main() -> None:
         action="append",
         help="Acceptance criteria for feature mode (can be specified multiple times)",
     )
+    parser.add_argument(
+        "--verify-policy",
+        default="tests_only",
+        choices=["tests_only", "cmds_then_tests", "cmds_only"],
+        help="Verification policy for feature mode (default: tests_only)",
+    )
+    parser.add_argument(
+        "--focused-verify-cmd",
+        action="append",
+        dest="focused_verify_cmds",
+        help="Focused verification command (can be specified multiple times)",
+    )
+    parser.add_argument(
+        "--verify-cmd-extra",
+        action="append",
+        dest="verify_cmds",
+        help="Additional verification command (can be specified multiple times)",
+    )
+    parser.add_argument(
+        "--max-lines-changed",
+        type=int,
+        default=None,
+        help="Override maximum lines changed in patches",
+    )
+    parser.add_argument(
+        "--max-files-changed",
+        type=int,
+        default=None,
+        help="Override maximum files changed in patches",
+    )
+    parser.add_argument(
+        "--allow-lockfile-changes",
+        action="store_true",
+        help="Allow patches to modify lockfiles (package-lock.json, yarn.lock, etc.)",
+    )
     args = parser.parse_args()
 
     cfg = ControllerConfig(
@@ -306,6 +341,12 @@ def main() -> None:
         feature_mode=args.feature_mode,
         feature_description=args.feature_description,
         acceptance_criteria=args.acceptance_criteria or [],
+        verify_policy=args.verify_policy,
+        focused_verify_cmds=args.focused_verify_cmds or [],
+        verify_cmds=args.verify_cmds or [],
+        max_lines_changed=args.max_lines_changed,
+        max_files_changed=args.max_files_changed,
+        allow_lockfile_changes=args.allow_lockfile_changes,
     )
     result = run_controller(cfg)
     print(result)
