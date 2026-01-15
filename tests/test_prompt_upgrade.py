@@ -8,7 +8,6 @@ Tests verify that the new prompt:
 - Specifies tooling rules
 """
 
-import pytest
 import sys
 import os
 
