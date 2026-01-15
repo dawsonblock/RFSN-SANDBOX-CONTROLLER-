@@ -246,7 +246,8 @@ class TestIntegration:
         # If python is not installed, it will fail with "not in allowlist" first
         # so we check it's not blocked by allowlist
         if exit_code != 0:
-            assert "not allowed" not in stderr.lower() or "Command 'python' is not allowed" not in stderr
+            # If it failed, it must not be due to language allowlist blocking.
+            assert "is not allowed for this project type" not in stderr.lower()
     
     def test_hygiene_policy_selection_by_mode(self):
         """Test that hygiene policy is correctly selected based on mode."""
