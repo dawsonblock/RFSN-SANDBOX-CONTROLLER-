@@ -23,8 +23,8 @@ class TestControllerImport:
     def test_command_normalizer_imports(self):
         """Command normalizer module should import without errors."""
         try:
-            import rfsn_controller.command_normalizer
-            assert True
+            from rfsn_controller.command_normalizer import detect_shell_idioms
+            assert callable(detect_shell_idioms)
         except (SyntaxError, ImportError) as e:
             pytest.fail(f"Command normalizer module has error: {e}")
 
