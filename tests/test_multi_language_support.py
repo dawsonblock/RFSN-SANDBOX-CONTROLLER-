@@ -110,7 +110,7 @@ class TestModeSpecificHygiene:
 index 1234567..abcdefg 100644
 --- a/test_example.py
 +++ b/test_example.py
-@@ -1,3 +1,4 @@
+@@ -1,2 +1,3 @@
  def test_example():
 -    assert 1 + 1 == 2
 +    assert 1 + 1 == 3  # Changed test
@@ -127,7 +127,7 @@ index 1234567..abcdefg 100644
 index 1234567..abcdefg 100644
 --- a/test_example.py
 +++ b/test_example.py
-@@ -1,3 +1,6 @@
+@@ -1,2 +1,5 @@
  def test_example():
      assert 1 + 1 == 2
 +
@@ -150,7 +150,7 @@ index 1234567..abcdefg 100644
 index 1234567..abcdefg 100644
 --- a/big_file.py
 +++ b/big_file.py
-@@ -1,1 +1,210 @@
+@@ -1 +1,210 @@
  # Big file
 {chr(10).join(lines)}
 """
@@ -169,7 +169,7 @@ index 1234567..abcdefg 100644
 index 1234567..abcdefg 100644
 --- a/feature_file.py
 +++ b/feature_file.py
-@@ -1,1 +1,300 @@
+@@ -1 +1,300 @@
  # Feature file
 {chr(10).join(lines)}
 """
@@ -186,37 +186,37 @@ index 1234567..abcdefg 100644
 index 1234567..abcdefg 100644
 --- a/file1.py
 +++ b/file1.py
-@@ -1,1 +1,2 @@
+@@ -1 +1,2 @@
 +# change
 diff --git a/file2.py b/file2.py
 index 1234567..abcdefg 100644
 --- a/file2.py
 +++ b/file2.py
-@@ -1,1 +1,2 @@
+@@ -1 +1,2 @@
 +# change
 diff --git a/file3.py b/file3.py
 index 1234567..abcdefg 100644
 --- a/file3.py
 +++ b/file3.py
-@@ -1,1 +1,2 @@
+@@ -1 +1,2 @@
 +# change
 diff --git a/file4.py b/file4.py
 index 1234567..abcdefg 100644
 --- a/file4.py
 +++ b/file4.py
-@@ -1,1 +1,2 @@
+@@ -1 +1,2 @@
 +# change
 diff --git a/file5.py b/file5.py
 index 1234567..abcdefg 100644
 --- a/file5.py
 +++ b/file5.py
-@@ -1,1 +1,2 @@
+@@ -1 +1,2 @@
 +# change
 diff --git a/file6.py b/file6.py
 index 1234567..abcdefg 100644
 --- a/file6.py
 +++ b/file6.py
-@@ -1,1 +1,2 @@
+@@ -1 +1,2 @@
 +# change
 """
         result = validate_patch_hygiene(diff, config)
@@ -233,7 +233,7 @@ index 1234567..abcdefg 100644
 index 1234567..abcdefg 100644
 --- a/file{i}.py
 +++ b/file{i}.py
-@@ -1,1 +1,2 @@
+@@ -1 +1,2 @@
 +# change {i}
 """)
         diff = "\n".join(file_diffs)
@@ -253,7 +253,7 @@ class TestFeatureModeTestModification:
 index 1234567..abcdefg 100644
 --- a/test_feature.py
 +++ b/test_feature.py
-@@ -1,3 +1,4 @@
+@@ -1,2 +1,3 @@
 +@pytest.mark.skip(reason="not implemented")
  def test_new_feature():
      assert my_function() == "expected"
@@ -274,7 +274,7 @@ deleted file mode 100644
 index 1234567..0000000
 --- a/test_old.py
 +++ /dev/null
-@@ -1,3 +0,0 @@
+@@ -1,2 +0,0 @@
 -def test_old():
 -    assert True
 """
