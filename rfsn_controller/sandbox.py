@@ -73,7 +73,18 @@ def _run(cmd: str, cwd: str, timeout_sec: int = 120, allowed_commands: Optional[
     if allowed_commands is not None and cmd_list:
         base_cmd = cmd_list[0]
         if base_cmd not in allowed_commands:
-            return 1, "", f"Command '{base_cmd}' not allowed for this project type. Allowed commands: {sorted(allowed_commands)[:10]}..."
+            allowed_list = sorted(allowed_commands)
+            preview = ", ".join(allowed_list[:10])
+            extra_count = max(len(allowed_list) - 10, 0)
+            extra_info = ""
+            if extra_count > 0:
+                extra_info = f" and {extra_count} more. See the project documentation for the full list of allowed commands."
+            return (
+                1,
+                "",
+                f"Command '{base_cmd}' is not allowed for this project type. "
+                f"Here are some allowed commands: {preview}{extra_info}"
+            )
 
     p = subprocess.run(
         cmd_list,
