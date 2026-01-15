@@ -158,6 +158,61 @@ class ModelOutputValidator:
                     is_valid=False,
                     validation_error=f"Request {i} missing 'tool' field",
                 )
+            
+            # Check for shell idioms in command arguments (critical for shell=False execution)
+            tool = req.get("tool", "")
+            args = req.get("args", {})
+            
+            # Check command arguments for shell idioms
+            if tool == "sandbox.run":
+                if not isinstance(args, dict) or "cmd" not in args or not args["cmd"]:
+                    return ModelOutput(
+                        mode="tool_request",
+                        requests=[{"tool": "sandbox.read_file", "args": {"path": "README.md"}}],
+                        why="Invalid sandbox.run request: missing required 'cmd' (must be a single command string).",
+                        is_valid=False,
+                        validation_error=f"Request {i} missing cmd for sandbox.run",
+                    )
+
+                cmd = args["cmd"]
+                if not isinstance(cmd, str):
+                    return ModelOutput(
+                        mode="tool_request",
+                        requests=[{"tool": "sandbox.read_file", "args": {"path": "README.md"}}],
+                        why="Invalid sandbox.run request: 'cmd' must be a string (single command).",
+                        is_valid=False,
+                        validation_error=f"Request {i} has non-string cmd",
+                    )
+                cmd = cmd.strip()
+                if "\n" in cmd or "\r" in cmd:
+                    return ModelOutput(
+                        mode="tool_request",
+                        requests=[{"tool": "sandbox.read_file", "args": {"path": "README.md"}}],
+                        why=(
+                            "Invalid sandbox.run request: commands must be a single line because the sandbox runs "
+                            "with shell=False. Please split multi-step workflows into multiple tool requests."
+                        ),
+                        is_valid=False,
+                        validation_error=f"Shell idiom in request {i}: newline in command",
+                    )
+                has_idiom, idiom_desc = self._detect_shell_idioms(cmd)
+                if has_idiom:
+                    # Provide corrective feedback
+                    corrective_why = (
+                        f"Invalid command due to shell idiom: {idiom_desc}. "
+                        f"The sandbox runs commands with shell=False, so shell features are not supported. "
+                        f"Please re-issue a new tool_request with a single direct command per request. "
+                        f"Split compound commands into separate requests, use explicit paths instead of 'cd', "
+                        f"and avoid inline env assignments (prefer flags or config). "
+                        f"Example: bad='npm install && npm test' -> good: two requests: 'npm install' then 'npm test'."
+                    )
+                    return ModelOutput(
+                        mode="tool_request",
+                        requests=[{"tool": "sandbox.read_file", "args": {"path": "README.md"}}],
+                        why=corrective_why,
+                        is_valid=False,
+                        validation_error=f"Shell idiom in request {i}: {idiom_desc}",
+                    )
 
         return ModelOutput(
             mode="tool_request",
