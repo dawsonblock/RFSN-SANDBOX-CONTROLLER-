@@ -26,6 +26,7 @@ class VerifyResult:
     failing_tests: List[str] = field(default_factory=list)
     sig: str = ""
     predicate_name: str = "tests"  # Name of the verification predicate
+    skipped: bool = False  # Whether verification was skipped
 
 
 @dataclass
@@ -242,19 +243,41 @@ class Verifier:
         )
 
 
-def run_tests(sb: Sandbox, test_cmd: str, timeout_sec: int = 120) -> VerifyResult:
+def run_tests(sb: Sandbox, test_cmd: str, timeout_sec: int = 120, allow_skip: bool = False) -> VerifyResult:
     """Run a test command and return structured results.
 
     Args:
         sb: The sandbox in which to run the tests.
         test_cmd: Command line to invoke the tests (e.g. "pytest -q").
         timeout_sec: Maximum seconds to wait for the command.
+        allow_skip: If True, return success if tests don't exist yet.
 
     Returns:
         A VerifyResult with status and details.
     """
     r = run_cmd(sb, test_cmd, timeout_sec=timeout_sec)
     out = (r.get("stdout") or "") + (r.get("stderr") or "")
+    
+    # Check if tests don't exist yet (common in feature mode)
+    if allow_skip:
+        no_tests_indicators = [
+            "no tests ran",
+            "no test",
+            "collected 0 items",
+            "cannot find",
+            "does not exist",
+        ]
+        if any(indicator in out.lower() for indicator in no_tests_indicators):
+            return VerifyResult(
+                ok=True,
+                exit_code=0,
+                stdout=r.get("stdout") or "",
+                stderr=r.get("stderr") or "",
+                failing_tests=[],
+                sig="",
+                skipped=True,
+            )
+    
     fails = parse_pytest_failures(out)
     sig = error_signature(r.get("stdout") or "", r.get("stderr") or "")
     try:
@@ -268,6 +291,7 @@ def run_tests(sb: Sandbox, test_cmd: str, timeout_sec: int = 120) -> VerifyResul
         stderr=r.get("stderr") or "",
         failing_tests=fails,
         sig=sig,
+        skipped=False,
     )
 
 

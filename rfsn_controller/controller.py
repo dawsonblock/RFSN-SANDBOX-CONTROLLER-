@@ -1273,8 +1273,15 @@ def run_controller(cfg: ControllerConfig) -> Dict[str, Any]:
 
                 # Validate patch hygiene
                 valid_patches: List[Tuple[str, float]] = []
+                
+                # Choose hygiene config based on mode
+                if cfg.feature_mode:
+                    hygiene_config = PatchHygieneConfig.for_feature_mode()
+                else:
+                    hygiene_config = PatchHygieneConfig.for_repair_mode()
+                
                 for diff, temp in patches_to_evaluate:
-                    hygiene_result = validate_patch_hygiene(diff, PatchHygieneConfig())
+                    hygiene_result = validate_patch_hygiene(diff, hygiene_config)
                     if hygiene_result.is_valid:
                         valid_patches.append((diff, temp))
                     else:

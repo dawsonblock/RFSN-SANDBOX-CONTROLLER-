@@ -8,12 +8,65 @@ from typing import Set, List, Optional
 
 # Approved commands that can be executed in the sandbox
 ALLOWED_COMMANDS: Set[str] = {
+    # Version control
     "git",
+    
+    # Python
     "pytest",
     "python",
     "python3",
     "pip",
     "pip3",
+    "pipenv",
+    "poetry",
+    "ruff",  # Linter
+    "mypy",  # Type checker
+    "black",  # Formatter
+    "flake8",  # Linter
+    "pylint",  # Linter
+    
+    # Node.js / JavaScript / TypeScript
+    "node",
+    "npm",
+    "yarn",
+    "pnpm",
+    "npx",
+    "bun",
+    "tsc",  # TypeScript compiler
+    "jest",  # Test framework
+    "mocha",  # Test framework
+    "eslint",  # Linter
+    "prettier",  # Formatter
+    
+    # Rust
+    "cargo",
+    "rustc",
+    "rustup",
+    "rustfmt",  # Formatter
+    "clippy",  # Linter
+    
+    # Go
+    "go",
+    "gofmt",  # Formatter
+    "golint",  # Linter
+    
+    # Java
+    "mvn",
+    "gradle",
+    "javac",
+    "java",
+    
+    # .NET / C#
+    "dotnet",
+    
+    # Ruby
+    "ruby",
+    "gem",
+    "bundle",
+    "rake",
+    "rspec",
+    
+    # Unix utilities
     "cat",
     "head",
     "tail",
@@ -36,8 +89,9 @@ ALLOWED_COMMANDS: Set[str] = {
     "wc",
     "diff",
     "patch",
-    "ruff",  # Linter
-    "mypy",  # Type checker
+    "tar",  # Archive extraction
+    "unzip",  # Archive extraction
+    "make",  # Build automation
 }
 
 # Commands that are explicitly blocked
