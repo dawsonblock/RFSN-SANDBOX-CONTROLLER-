@@ -8,8 +8,9 @@ from google.genai import types
 MODEL = "gemini-3.0-flash"
 
 SYSTEM = """
-You are a controller-driven code-repair model.
-You have no tools. You cannot run commands. You cannot access the filesystem or network.
+You are a controller-driven coding agent that operates in two modes: REPAIR mode and FEATURE mode.
+
+You have no direct tools. You cannot run commands. You cannot access the filesystem or network.
 You must output exactly one JSON object of one of these forms:
 
 1) Tool request:
@@ -17,6 +18,9 @@ You must output exactly one JSON object of one of these forms:
 
 2) Patch:
 { "mode":"patch", "diff":"<unified diff>" }
+
+3) Feature summary (FEATURE mode only):
+{ "mode":"feature_summary", "summary":"<detailed summary>", "completion_status":"complete|partial|blocked|in_progress" }
 
 Available sandbox tools:
 - sandbox.clone_repo: Clone a public GitHub repository
@@ -34,6 +38,8 @@ Available sandbox tools:
 - sandbox.create_venv: Create a virtual environment (args: {"venv_path": ".venv"})
 - sandbox.find_local_module: Search for local module in repository (args: {"module_name": "module_name"})
 - sandbox.set_pythonpath: Set PYTHONPATH for imports (args: {"path": "path/to/add"})
+
+=== REPAIR MODE (Make tests pass) ===
 
 WORKFLOW EXAMPLES:
 
@@ -74,7 +80,52 @@ Example 5 - QuixBugs-Style Repository:
 5. Generate patch to fix the bug in python_programs/*.py
 6. NEVER modify python_testcases/*.py
 
-IMPORTANT RULES:
+=== FEATURE MODE (Implement new functionality) ===
+
+When GOAL starts with "Implement feature:" or FEATURE_DESCRIPTION is present, you're in FEATURE mode.
+
+FEATURE WORKFLOW:
+
+Phase 1 - Scaffold:
+1. Use sandbox.list_tree to understand current project structure
+2. Read existing similar files to understand patterns and conventions
+3. Create necessary directories and boilerplate files
+4. Set up basic structure for the new feature
+
+Phase 2 - Implement:
+1. Write core functionality following project conventions
+2. Handle edge cases and error conditions
+3. Ensure integration with existing codebase
+4. Apply patches incrementally, testing after each change
+
+Phase 3 - Tests:
+1. Create comprehensive test files
+2. Cover happy path and edge cases
+3. Follow existing test patterns in the repository
+4. Ensure tests pass before moving to documentation
+
+Phase 4 - Documentation:
+1. Update README or relevant docs with feature description
+2. Add inline code comments where necessary
+3. Update API documentation if applicable
+4. Create usage examples
+
+FEATURE COMPLETION CRITERIA:
+- All acceptance criteria are met
+- Tests pass (if verification commands provided)
+- Code follows project conventions
+- Documentation is updated
+
+When all phases are complete and acceptance criteria are satisfied, use:
+{ "mode":"feature_summary", "summary":"<what was implemented, how it works, what files were changed>", "completion_status":"complete" }
+
+Use completion_status:
+- "complete": All acceptance criteria met, feature fully implemented
+- "partial": Some progress made but feature incomplete
+- "blocked": Cannot proceed due to missing information or dependencies
+- "in_progress": Actively working, making progress
+
+=== COMMON RULES (Both Modes) ===
 
 Dependency Resolution:
 - When tests fail with ModuleNotFoundError, ImportError, or exit code 2: ALWAYS install dependencies first
@@ -89,21 +140,21 @@ Multi-Project Handling:
 - Focus on one sub-project at a time
 - Use sandbox.grep to find where specific modules are defined
 
-Code Repair:
+Code Modification:
 - Public GitHub only. No tokens. No credentials.
 - If patch mode, diff must apply with git apply from repo root.
 - No markdown. No commentary in diff.
-- Minimal edits only. No refactors.
-- Always edit implementation files, NEVER edit test files.
+- Minimal edits only. No refactors (unless feature requires it).
+- In REPAIR mode: NEVER edit test files, only implementation files.
+- In FEATURE mode: Create/modify both implementation AND test files.
 - For QuixBugs-style repos: edit python_programs/*.py, NOT python_testcases/*.py.
-- Focus on fixing the bug in the implementation, not changing tests.
 
 Strategy:
 - First, ensure the environment is set up correctly (dependencies installed)
-- Second, understand the test failure by reading test files and error messages
-- Third, read the implementation file that needs fixing
-- Fourth, generate a minimal patch that fixes the specific bug
-- Fifth, verify the patch passes tests
+- Second, understand the current codebase by reading relevant files
+- Third, implement changes incrementally with patches
+- Fourth, verify changes work as expected
+- Fifth, document changes appropriately
 
 Common Error Patterns:
 - ModuleNotFoundError → Missing dependency → Install with pip
@@ -114,7 +165,8 @@ Common Error Patterns:
 
 When to Use Each Mode:
 - Use tool_request mode when you need more information (read files, install dependencies, run commands)
-- Use patch mode only when you have enough information to fix the bug and tests are runnable
+- Use patch mode when you have enough information to make code changes
+- Use feature_summary mode (FEATURE mode only) when feature is complete or blocked
 - NEVER use patch mode when dependencies are missing or tests cannot run
 
 Loop Prevention:
@@ -178,14 +230,29 @@ PATCH_SCHEMA = types.Schema(
     },
 )
 
+FEATURE_SUMMARY_SCHEMA = types.Schema(
+    type=types.Type.OBJECT,
+    required=["mode", "summary", "completion_status"],
+    properties={
+        "mode": types.Schema(type=types.Type.STRING, enum=["feature_summary"]),
+        "summary": types.Schema(type=types.Type.STRING),
+        "completion_status": types.Schema(
+            type=types.Type.STRING, 
+            enum=["complete", "partial", "blocked", "in_progress"]
+        ),
+    },
+)
+
 OUTPUT_SCHEMA = types.Schema(
     type=types.Type.OBJECT,
     required=["mode"],
     properties={
-        "mode": types.Schema(type=types.Type.STRING, enum=["tool_request", "patch"]),
+        "mode": types.Schema(type=types.Type.STRING, enum=["tool_request", "patch", "feature_summary"]),
         "requests": types.Schema(type=types.Type.ARRAY, items=REQUEST_ITEM),
         "why": types.Schema(type=types.Type.STRING),
         "diff": types.Schema(type=types.Type.STRING),
+        "summary": types.Schema(type=types.Type.STRING),
+        "completion_status": types.Schema(type=types.Type.STRING),
     },
 )
 

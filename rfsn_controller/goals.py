@@ -1,11 +1,20 @@
 """Enhanced goal types beyond just tests.
 
-Supports multiple goal types: tests, build, lint, repro, static check.
+Supports multiple goal types: tests, build, lint, repro, static check, feature.
 """
 
 from dataclasses import dataclass
 from typing import Optional, List
 from enum import Enum
+
+
+# Default feature subgoals (used by both FeatureGoal and controller)
+DEFAULT_FEATURE_SUBGOALS = [
+    "scaffold: Create necessary file structure and boilerplate",
+    "implement: Write core functionality",
+    "tests: Add comprehensive tests",
+    "docs: Update documentation",
+]
 
 
 class GoalType(Enum):
@@ -17,6 +26,7 @@ class GoalType(Enum):
     STATIC_CHECK = "static_check"  # Static analysis passes
     REPRO = "repro"  # Repro script exits 0
     CUSTOM = "custom"  # Custom command
+    FEATURE = "feature"  # Feature implementation
 
 
 @dataclass
@@ -28,6 +38,41 @@ class Goal:
     description: str
     timeout: int = 300
     required: bool = True
+
+
+@dataclass
+class FeatureGoal:
+    """A feature implementation goal with acceptance criteria."""
+
+    description: str
+    acceptance_criteria: List[str]
+    subgoals: Optional[List[str]] = None
+    verification_commands: Optional[List[str]] = None
+    timeout: int = 600
+
+    def __post_init__(self):
+        """Initialize default subgoals if not provided and validate inputs."""
+        # Validate description
+        if not self.description or not self.description.strip():
+            raise ValueError("Feature description cannot be empty")
+        
+        # Validate acceptance criteria
+        if not self.acceptance_criteria:
+            raise ValueError("At least one acceptance criterion is required")
+        
+        # Filter empty criteria - create new list to avoid mutating input
+        filtered_criteria = [c for c in self.acceptance_criteria if c and c.strip()]
+        if not filtered_criteria:
+            raise ValueError("All acceptance criteria are empty")
+        self.acceptance_criteria = filtered_criteria
+        
+        # Set default subgoals if not provided
+        if self.subgoals is None:
+            self.subgoals = list(DEFAULT_FEATURE_SUBGOALS)  # Create a copy
+        
+        # Validate timeout
+        if self.timeout <= 0:
+            raise ValueError("Timeout must be positive")
 
 
 class GoalFactory:
@@ -173,6 +218,31 @@ class GoalFactory:
             description=description,
             timeout=timeout,
             required=required,
+        )
+
+    @staticmethod
+    def create_feature_goal(
+        description: str,
+        acceptance_criteria: List[str],
+        verification_commands: Optional[List[str]] = None,
+        timeout: int = 600,
+    ) -> FeatureGoal:
+        """Create a feature implementation goal.
+
+        Args:
+            description: Feature description.
+            acceptance_criteria: List of acceptance criteria.
+            verification_commands: Optional commands to verify feature.
+            timeout: Timeout in seconds.
+
+        Returns:
+            FeatureGoal instance.
+        """
+        return FeatureGoal(
+            description=description,
+            acceptance_criteria=acceptance_criteria,
+            verification_commands=verification_commands,
+            timeout=timeout,
         )
 
 
