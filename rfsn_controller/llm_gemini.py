@@ -62,7 +62,8 @@ Use this to propose code changes.
 Format:
 {
   "mode": "patch",
-  "diff": "<unified diff>"
+  "diff": "<unified diff>",
+  "why": "<optional: explanation of what changed and why>"
 }
 
 Rules:
@@ -70,6 +71,7 @@ Rules:
 - Changes must be minimal and targeted.
 - No unrelated refactors, formatting churn, or cleanup.
 - Tests must be added or updated when behavior changes.
+- Including "why" is encouraged for auditability and debugging.
 
 ──────────────────────────────────────────────────────────────
 feature_summary
