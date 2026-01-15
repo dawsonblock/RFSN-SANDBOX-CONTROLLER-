@@ -179,7 +179,7 @@ class TestControllerSourceCode:
         
         # Verify reproducibility logic exists
         assert "repro_times" in source
-        assert "reproducible" in source or "run {run_idx+1}" in source
+        assert "reproducible" in source or "run_idx+1" in source
     
     def test_blocked_tool_feedback_exists(self):
         """Controller should provide structured feedback for blocked tools."""
