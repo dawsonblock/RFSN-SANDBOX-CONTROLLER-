@@ -158,6 +158,31 @@ class ModelOutputValidator:
                     is_valid=False,
                     validation_error=f"Request {i} missing 'tool' field",
                 )
+            
+            # Check for shell idioms in command arguments (critical for shell=False execution)
+            tool = req.get("tool", "")
+            args = req.get("args", {})
+            
+            # Check command arguments for shell idioms
+            if tool == "sandbox.run" and "cmd" in args:
+                cmd = args["cmd"]
+                has_idiom, idiom_desc = self._detect_shell_idioms(cmd)
+                if has_idiom:
+                    # Provide corrective feedback
+                    corrective_why = (
+                        f"Shell idiom detected in command: {idiom_desc}. "
+                        f"The sandbox uses shell=False, so shell features are not supported. "
+                        f"Split compound commands into separate tool_request calls. "
+                        f"Use explicit paths instead of cd. "
+                        f"Do not use inline environment variables (use config files or flags instead)."
+                    )
+                    return ModelOutput(
+                        mode="tool_request",
+                        requests=[{"tool": "sandbox.read_file", "args": {"path": "README.md"}}],
+                        why=corrective_why,
+                        is_valid=False,
+                        validation_error=f"Shell idiom in request {i}: {idiom_desc}",
+                    )
 
         return ModelOutput(
             mode="tool_request",
