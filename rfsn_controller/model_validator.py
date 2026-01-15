@@ -44,6 +44,19 @@ class ModelOutputValidator:
         re.compile(r'^- '),  # Markdown dash
     ]
 
+    # Shell idiom patterns (forbidden because shell=False in sandbox)
+    SHELL_IDIOM_PATTERNS = [
+        (re.compile(r'&&'), 'command chaining with &&'),
+        (re.compile(r'\|\s*[^\|]'), 'pipe operator |'),
+        (re.compile(r'(?<!-)>(?!>)'), 'redirect operator >'),
+        (re.compile(r'<(?!<)'), 'redirect operator <'),
+        (re.compile(r'\$\('), 'command substitution $()'),
+        (re.compile(r'`[^`]+`'), 'backtick command substitution'),
+        (re.compile(r'^\s*cd\s+'), 'cd command'),
+        (re.compile(r'\bcd\s+'), 'cd command'),
+        (re.compile(r'^\s*[A-Z_][A-Z0-9_]*='), 'inline environment variable assignment'),
+    ]
+
     def __init__(self):
         """Initialize the validator."""
         pass
@@ -239,6 +252,23 @@ class ModelOutputValidator:
             completion_status=completion_status,
             is_valid=True,
         )
+
+    def _detect_shell_idioms(self, text: str) -> Tuple[bool, Optional[str]]:
+        """Detect forbidden shell idioms in text.
+        
+        The sandbox uses shell=False, so shell features like &&, pipes, redirects,
+        command substitution, and cd are not supported and must be rejected.
+        
+        Args:
+            text: Text to check for shell idioms.
+            
+        Returns:
+            Tuple of (has_idiom, description) where has_idiom is True if found.
+        """
+        for pattern, description in self.SHELL_IDIOM_PATTERNS:
+            if pattern.search(text):
+                return True, description
+        return False, None
 
     def _validate_diff_format(self, diff: str) -> Tuple[bool, Optional[str]]:
         """Validate that a string is a valid unified diff.

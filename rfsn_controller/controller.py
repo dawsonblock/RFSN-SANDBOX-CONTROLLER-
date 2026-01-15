@@ -137,6 +137,13 @@ def _constraints_text() -> str:
         "- Minimal edits. No refactors. No reformatting.",
         "- Public GitHub only. No tokens.",
         "- Do not touch forbidden paths: " + ", ".join(FORBIDDEN_PREFIXES),
+        "- IMPORTANT: Commands run with shell=False - no shell features allowed:",
+        "  * No command chaining (&&, ||, ;)",
+        "  * No pipes (|) or redirects (>, <, >>)",
+        "  * No command substitution ($(), backticks)",
+        "  * No inline environment variables (VAR=value cmd)",
+        "  * No cd commands (commands run from repo root)",
+        "  * Each command must be a single executable with arguments only.",
     ])
 
 
@@ -433,6 +440,7 @@ def run_controller(cfg: ControllerConfig) -> Dict[str, Any]:
     baseline_output = ""
     final_output = ""
     winner_diff = None
+    feature_summary = None  # Store feature summary for evidence pack
 
     try:
         log({
@@ -1242,16 +1250,10 @@ def run_controller(cfg: ControllerConfig) -> Dict[str, Any]:
                     
                     if completion_status == "complete":
                         print(f"\n✅ FEATURE COMPLETE after {step} steps")
+                        # Store summary for evidence pack and transition to FINAL_VERIFY
+                        feature_summary = summary
                         current_phase = Phase.FINAL_VERIFY
-                        return {
-                            "ok": True,
-                            "sandbox": sb.root,
-                            "repo_dir": sb.repo_dir,
-                            "steps_taken": step,
-                            "phase": "feature_complete",
-                            "summary": summary,
-                            "completion_status": completion_status,
-                        }
+                        break  # Exit repair loop to run FINAL_VERIFY
                     elif completion_status == "blocked":
                         bailout_reason = f"Feature blocked: {summary[:100]}"
                         print(f"\n❌ Early termination: {bailout_reason}")
@@ -1415,6 +1417,7 @@ def run_controller(cfg: ControllerConfig) -> Dict[str, Any]:
             "final_failing_tests": len(v.failing_tests) if not v.ok else 0,
             "final_ok": v.ok,
             "bailout_reason": bailout_reason,
+            "feature_summary": feature_summary,  # Include feature summary if present
         }
 
         pack_dir = evidence_exporter.export(
