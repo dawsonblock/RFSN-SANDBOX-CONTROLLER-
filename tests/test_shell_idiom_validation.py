@@ -338,14 +338,14 @@ class TestShellIdiomDetection:
         assert not has_idiom
         assert desc is None
 
-    def test_double_greater_than_not_detected(self, validator):
-        """Test that >> (append redirect) is not a false positive for comparison."""
-        # This test ensures we don't incorrectly flag >> in non-shell contexts
-        # Note: >> should still be blocked as it's a shell redirect
+    def test_double_greater_than_detected_as_redirect(self, validator):
+        """Test that >> (append redirect) is detected as a shell redirect idiom."""
+        # This test ensures that >> is treated as a shell redirect idiom
+        # even when it appears in expressions that could resemble comparisons.
         has_idiom, desc = validator._detect_shell_idioms("compare >> 5")
-        # This might legitimately be detected as a redirect, which is fine
-        # The key is we don't crash or behave unexpectedly
-        assert desc is None or "redirect" in desc.lower()
+        assert has_idiom
+        assert desc is not None
+        assert "redirect" in desc.lower()
 
 
 if __name__ == "__main__":
