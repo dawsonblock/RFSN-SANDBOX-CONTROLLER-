@@ -1262,14 +1262,16 @@ def run_controller(cfg: ControllerConfig) -> Dict[str, Any]:
                             for br in blocked_reasons
                         )
                     ):
-                        bailout_reason = f"Tool quota exhausted ({total_tool_calls}/{cfg.max_tool_calls} calls used)"
+                        # Prefer the tool manager's authoritative counter, fall back to our local tally.
+                        used_calls = getattr(tool_manager, "total_requests_this_run", total_tool_calls)
+                        bailout_reason = f"Tool quota exhausted ({used_calls}/{cfg.max_tool_calls} calls used)"
                         print(f"\n❌ Early termination: {bailout_reason}")
                         log({
                             "phase": "bailout",
                             "step": step,
                             "reason": bailout_reason,
                             "tool_stats": tool_manager.get_stats(),
-                            "total_tool_calls": total_tool_calls,
+                            "total_tool_calls": used_calls,
                         })
                         current_phase = Phase.BAILOUT
                         break
