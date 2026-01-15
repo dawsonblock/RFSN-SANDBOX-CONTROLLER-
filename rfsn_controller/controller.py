@@ -1441,14 +1441,93 @@ def run_controller(cfg: ControllerConfig) -> Dict[str, Any]:
         if current_phase == Phase.FINAL_VERIFY:
             log(PhaseTransition(Phase.REPAIR_LOOP, Phase.FINAL_VERIFY).to_dict())
 
-            print("\n[FINAL_VERIFY] Running full test suite...")
-            v = _run_tests_in_sandbox(sb, effective_test_cmd, cfg, command_log, selected_buildpack, selected_buildpack_instance)
-            final_output = (v.stdout or "") + "\n" + (v.stderr or "")
-
-            if v.ok:
-                print("\n✅ FINAL SUCCESS! All tests passing.")
+            # Track verification results
+            verification_passed = True
+            verification_results = []
+            
+            # Execute verification commands based on policy
+            # 1. Focused verify commands (if any)
+            for idx, cmd in enumerate(cfg.focused_verify_cmds):
+                print(f"\n[FINAL_VERIFY] Running focused verification {idx+1}/{len(cfg.focused_verify_cmds)}: {cmd}")
+                v_result = _run_tests_in_sandbox(sb, cmd, cfg, command_log, selected_buildpack, selected_buildpack_instance)
+                verification_results.append({
+                    "type": "focused_verify",
+                    "command": cmd,
+                    "passed": v_result.ok,
+                    "exit_code": v_result.exit_code,
+                })
+                log({
+                    "phase": "focused_verify",
+                    "command": cmd,
+                    "passed": v_result.ok,
+                    "exit_code": v_result.exit_code,
+                })
+                if not v_result.ok:
+                    print(f"  ❌ Focused verification failed")
+                    verification_passed = False
+                else:
+                    print(f"  ✅ Focused verification passed")
+            
+            # 2. Regular verify commands (if any)
+            for idx, cmd in enumerate(cfg.verify_cmds):
+                print(f"\n[FINAL_VERIFY] Running verification {idx+1}/{len(cfg.verify_cmds)}: {cmd}")
+                v_result = _run_tests_in_sandbox(sb, cmd, cfg, command_log, selected_buildpack, selected_buildpack_instance)
+                verification_results.append({
+                    "type": "verify",
+                    "command": cmd,
+                    "passed": v_result.ok,
+                    "exit_code": v_result.exit_code,
+                })
+                log({
+                    "phase": "verify",
+                    "command": cmd,
+                    "passed": v_result.ok,
+                    "exit_code": v_result.exit_code,
+                })
+                if not v_result.ok:
+                    print(f"  ❌ Verification failed")
+                    verification_passed = False
+                else:
+                    print(f"  ✅ Verification passed")
+            
+            # 3. Test command (unless policy is "cmds_only")
+            if cfg.verify_policy != "cmds_only":
+                print(f"\n[FINAL_VERIFY] Running test suite: {effective_test_cmd}")
+                v = _run_tests_in_sandbox(sb, effective_test_cmd, cfg, command_log, selected_buildpack, selected_buildpack_instance)
+                final_output = (v.stdout or "") + "\n" + (v.stderr or "")
+                verification_results.append({
+                    "type": "tests",
+                    "command": effective_test_cmd,
+                    "passed": v.ok,
+                    "exit_code": v.exit_code,
+                })
+                log({
+                    "phase": "test_verify",
+                    "command": effective_test_cmd,
+                    "passed": v.ok,
+                    "exit_code": v.exit_code,
+                })
+                if not v.ok:
+                    print(f"  ❌ Tests failed: {len(v.failing_tests)} failing tests")
+                    verification_passed = False
+                else:
+                    print(f"  ✅ All tests passed")
             else:
-                print(f"\n⚠️  Final verify failed: {len(v.failing_tests)} failing tests")
+                # For cmds_only policy, create a placeholder result
+                v = VerifyResult(ok=verification_passed, exit_code=0, stdout="", stderr="", failing_tests=[], sig="")
+                final_output = ""
+
+            # Overall verification result
+            log({
+                "phase": "final_verify_complete",
+                "verification_passed": verification_passed,
+                "verification_results": verification_results,
+            })
+            
+            if verification_passed:
+                print("\n✅ FINAL SUCCESS! All verifications passed.")
+            else:
+                print(f"\n⚠️  Final verify failed")
                 current_phase = Phase.BAILOUT
 
         # === PHASE: EVIDENCE_PACK ===
