@@ -1079,7 +1079,7 @@ def run_controller(cfg: ControllerConfig) -> Dict[str, Any]:
                     "goal": f"Implement feature: {cfg.feature_description or 'As specified'}",
                     "feature_description": cfg.feature_description or "",
                     "acceptance_criteria": cfg.acceptance_criteria or [],
-                    "completed_subgoals": completed_feature_subgoals.copy(),  # Defensive copy
+                    "completed_subgoals": completed_feature_subgoals,  # Pass reference, not copy
                     "current_subgoal": current_subgoal,
                     "test_cmd": effective_test_cmd,
                     "focus_test_cmd": pd.focus_test_cmd,

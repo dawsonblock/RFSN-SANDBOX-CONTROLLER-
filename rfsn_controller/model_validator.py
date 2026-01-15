@@ -24,15 +24,6 @@ class ModelOutput:
     completion_status: Optional[str] = None
     is_valid: bool = True
     validation_error: Optional[str] = None
-    
-    def __post_init__(self):
-        """Validate output consistency after initialization."""
-        if self.mode == "tool_request" and not self.requests:
-            raise ValueError("tool_request mode requires requests")
-        if self.mode == "patch" and not self.diff:
-            raise ValueError("patch mode requires diff")
-        if self.mode == "feature_summary" and not self.summary:
-            raise ValueError("feature_summary mode requires summary")
 
 
 class ModelOutputValidator:

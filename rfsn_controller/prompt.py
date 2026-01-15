@@ -1,20 +1,20 @@
 """Helpers for constructing model input strings."""
 
-from typing import Dict, Any, Optional
+from typing import Dict, Any
 
 # Mode constants
 MODE_FEATURE = "feature"
 
 
-def _truncate(s: Optional[str], n: int) -> str:
+def _truncate(s: str, n: int) -> str:
     """Truncate a string to at most n characters, appending a marker if truncated.
     
     Args:
-        s: String to truncate, can be None
+        s: String to truncate
         n: Maximum length
         
     Returns:
-        Truncated string or empty string if input is None
+        Truncated string or empty string if input is empty
     """
     if not s:
         return ""

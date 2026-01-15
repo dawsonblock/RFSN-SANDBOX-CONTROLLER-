@@ -60,10 +60,11 @@ class FeatureGoal:
         if not self.acceptance_criteria:
             raise ValueError("At least one acceptance criterion is required")
         
-        # Remove empty criteria
-        self.acceptance_criteria = [c for c in self.acceptance_criteria if c and c.strip()]
-        if not self.acceptance_criteria:
+        # Filter empty criteria - create new list to avoid mutating input
+        filtered_criteria = [c for c in self.acceptance_criteria if c and c.strip()]
+        if not filtered_criteria:
             raise ValueError("All acceptance criteria are empty")
+        self.acceptance_criteria = filtered_criteria
         
         # Set default subgoals if not provided
         if self.subgoals is None:
