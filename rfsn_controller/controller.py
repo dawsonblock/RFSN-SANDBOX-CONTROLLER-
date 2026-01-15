@@ -1526,6 +1526,7 @@ def run_controller(cfg: ControllerConfig) -> Dict[str, Any]:
             # 1. Focused verify commands (if any)
             if run_cmd_verification:
                 for idx, cmd in enumerate(cfg.focused_verify_cmds):
+                    total_verification_attempts += 1
                     print(f"\n[FINAL_VERIFY] Running focused verification {idx+1}/{len(cfg.focused_verify_cmds)}: {cmd}")
                     v_result = _run_tests_in_sandbox(sb, cmd, cfg, command_log, selected_buildpack, selected_buildpack_instance)
                     verification_results.append({
@@ -1549,6 +1550,7 @@ def run_controller(cfg: ControllerConfig) -> Dict[str, Any]:
             # 2. Regular verify commands (if any)
             if run_cmd_verification:
                 for idx, cmd in enumerate(cfg.verify_cmds):
+                    total_verification_attempts += 1
                     print(f"\n[FINAL_VERIFY] Running verification {idx+1}/{len(cfg.verify_cmds)}: {cmd}")
                     v_result = _run_tests_in_sandbox(sb, cmd, cfg, command_log, selected_buildpack, selected_buildpack_instance)
                     verification_results.append({
@@ -1574,6 +1576,9 @@ def run_controller(cfg: ControllerConfig) -> Dict[str, Any]:
                 # Run tests with reproducibility check (N times if configured)
                 repro_passed = True
                 for run_idx in range(cfg.repro_times):
+                    # Track verification attempts
+                    total_verification_attempts += 1
+                    
                     if cfg.repro_times > 1:
                         print(f"\n[FINAL_VERIFY] Running test suite (run {run_idx+1}/{cfg.repro_times}): {effective_test_cmd}")
                     else:
