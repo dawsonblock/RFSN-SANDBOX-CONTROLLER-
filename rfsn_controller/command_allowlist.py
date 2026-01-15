@@ -172,8 +172,8 @@ def is_command_allowed(command: str) -> tuple[bool, Optional[str]]:
 
     base_cmd = parts[0]
 
-    # Check for cd command (base command or inline usage)
-    if base_cmd == "cd" or " cd " in command or command.startswith("cd "):
+    # Check for cd command anywhere
+    if "cd" in parts:
         return False, "cd command is blocked - commands run from repo root"
 
     # Check if command is explicitly blocked
