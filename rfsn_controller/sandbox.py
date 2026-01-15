@@ -71,7 +71,7 @@ def _run(cmd: str, cwd: str, timeout_sec: int = 120, allowed_commands: Optional[
 
     # Check against language-specific allowlist if provided
     if allowed_commands is not None and cmd_list:
-        base_cmd = cmd_list[0]
+        base_cmd = os.path.basename(cmd_list[0])
         if base_cmd not in allowed_commands:
             allowed_list = sorted(allowed_commands)
             preview = ", ".join(allowed_list[:10])
