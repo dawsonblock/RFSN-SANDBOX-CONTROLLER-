@@ -8,8 +8,8 @@ def require_network() -> None:
         return
     pytest.skip("network tests disabled (set RFSN_ENABLE_NETWORK_TESTS=1 to enable)")
 
-def pytest_collection_modifyitems(config, items):
-    """
+if os.environ.get("RFSN_ENABLE_NETWORK_TESTS", "").strip().lower() in {"1", "true", "yes", "on"}:
+    return
     Skip tests marked with 'network' if network tests are not enabled.
     """
     for item in items:
