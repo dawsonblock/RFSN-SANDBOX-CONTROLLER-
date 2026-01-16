@@ -1,7 +1,25 @@
 """DeepSeek API client with structured output enforcement for RFSN controller."""
 
 import os
-from openai import OpenAI
+import json
+
+# Lazy import: only import openai when actually calling the model
+# This allows the controller to be imported even if openai is not installed
+_openai = None
+
+
+def _ensure_openai_imported():
+    """Lazily import openai module."""
+    global _openai
+    if _openai is None:
+        try:
+            from openai import OpenAI
+            _openai = OpenAI
+        except ImportError as e:
+            raise RuntimeError(
+                "OpenAI SDK not available. Install with: pip install openai>=1.0.0"
+            ) from e
+    return _openai
 
 
 MODEL = "deepseek-chat"
@@ -202,14 +220,15 @@ You are a bounded coding agent. Act through evidence, minimal diffs, and verific
 _client = None  # cached client instance
 
 
-def client() -> OpenAI:
+def client():
     """Return a singleton DeepSeek client, reading API key from env.
 
     Raises:
-        RuntimeError: if the DEEPSEEK_API_KEY environment variable is not set.
+        RuntimeError: if the DEEPSEEK_API_KEY environment variable is not set or openai SDK is not installed.
     """
     global _client
     if _client is None:
+        OpenAI = _ensure_openai_imported()
         key = os.environ.get("DEEPSEEK_API_KEY")
         if not key:
             raise RuntimeError("Missing DEEPSEEK_API_KEY")
@@ -230,7 +249,12 @@ def call_model(model_input: str, temperature: float = 0.0) -> dict:
     Returns:
         A dictionary parsed from the JSON response. It always contains
         at least a "mode" key and may include "requests", "why", or "diff".
+        
+    Raises:
+        RuntimeError: if openai SDK is not available.
     """
+    _ensure_openai_imported()  # Ensure SDK is available before making the call
+    
     resp = client().chat.completions.create(
         model=MODEL,
         messages=[
@@ -242,5 +266,4 @@ def call_model(model_input: str, temperature: float = 0.0) -> dict:
     )
 
     content = resp.choices[0].message.content
-    import json
     return json.loads(content)

@@ -1,11 +1,30 @@
 """Gemini API client with structured output enforcement for RFSN controller."""
 
 import os
-from google import genai
-from google.genai import types
 
 
 MODEL = "gemini-3.0-flash"
+
+# Lazy import: only import google.genai when actually calling the model
+# This allows the controller to be imported even if google-genai is not installed
+_genai = None
+_types = None
+
+
+def _ensure_genai_imported():
+    """Lazily import google.genai modules."""
+    global _genai, _types
+    if _genai is None:
+        try:
+            from google import genai
+            from google.genai import types as genai_types
+            _genai = genai
+            _types = genai_types
+        except ImportError as e:
+            raise RuntimeError(
+                "Google GenAI SDK not available. Install with: pip install google-genai>=0.7.0"
+            ) from e
+    return _genai, _types
 
 SYSTEM = """
 You are RFSN-CODE, a controller-governed CODING AGENT operating inside a locked-down sandbox.
@@ -201,90 +220,65 @@ You are a bounded coding agent. Act through evidence, minimal diffs, and verific
 """.strip()
 
 
-# Schema: mode + either requests or diff
-REQUEST_ITEM = types.Schema(
-    type=types.Type.OBJECT,
-    required=["tool", "args"],
-    properties={
-        "tool": types.Schema(type=types.Type.STRING),
-        "args": types.Schema(
-            type=types.Type.OBJECT,
-            properties={
-                "path": types.Schema(type=types.Type.STRING),
-                "cmd": types.Schema(type=types.Type.STRING),
-                "query": types.Schema(type=types.Type.STRING),
-                "github_url": types.Schema(type=types.Type.STRING),
-                "diff": types.Schema(type=types.Type.STRING),
-                "ref": types.Schema(type=types.Type.STRING),
-                "max_bytes": types.Schema(type=types.Type.INTEGER),
-                "max_matches": types.Schema(type=types.Type.INTEGER),
-                "max_files": types.Schema(type=types.Type.INTEGER),
-                "timeout_sec": types.Schema(type=types.Type.INTEGER),
-                "packages": types.Schema(type=types.Type.STRING),
-                "requirements_file": types.Schema(type=types.Type.STRING),
-                "venv_path": types.Schema(type=types.Type.STRING),
-                "module_name": types.Schema(type=types.Type.STRING),
-            },
-        ),
-    },
-)
-
-TOOL_REQUEST_SCHEMA = types.Schema(
-    type=types.Type.OBJECT,
-    required=["mode", "requests", "why"],
-    properties={
-        "mode": types.Schema(type=types.Type.STRING, enum=["tool_request"]),
-        "requests": types.Schema(type=types.Type.ARRAY, items=REQUEST_ITEM),
-        "why": types.Schema(type=types.Type.STRING),
-    },
-)
-
-PATCH_SCHEMA = types.Schema(
-    type=types.Type.OBJECT,
-    required=["mode", "diff"],
-    properties={
-        "mode": types.Schema(type=types.Type.STRING, enum=["patch"]),
-        "diff": types.Schema(type=types.Type.STRING),
-    },
-)
-
-FEATURE_SUMMARY_SCHEMA = types.Schema(
-    type=types.Type.OBJECT,
-    required=["mode", "summary", "completion_status"],
-    properties={
-        "mode": types.Schema(type=types.Type.STRING, enum=["feature_summary"]),
-        "summary": types.Schema(type=types.Type.STRING),
-        "completion_status": types.Schema(
-            type=types.Type.STRING, 
-            enum=["complete", "partial", "blocked", "in_progress"]
-        ),
-    },
-)
-
-OUTPUT_SCHEMA = types.Schema(
-    type=types.Type.OBJECT,
-    required=["mode"],
-    properties={
-        "mode": types.Schema(type=types.Type.STRING, enum=["tool_request", "patch", "feature_summary"]),
-        "requests": types.Schema(type=types.Type.ARRAY, items=REQUEST_ITEM),
-        "why": types.Schema(type=types.Type.STRING),
-        "diff": types.Schema(type=types.Type.STRING),
-        "summary": types.Schema(type=types.Type.STRING),
-        "completion_status": types.Schema(type=types.Type.STRING),
-    },
-)
+def _build_schemas():
+    """Build the Gemini API schemas using lazy-imported types."""
+    _, types = _ensure_genai_imported()
+    
+    # Schema: mode + either requests or diff
+    request_item = types.Schema(
+        type=types.Type.OBJECT,
+        required=["tool", "args"],
+        properties={
+            "tool": types.Schema(type=types.Type.STRING),
+            "args": types.Schema(
+                type=types.Type.OBJECT,
+                properties={
+                    "path": types.Schema(type=types.Type.STRING),
+                    "cmd": types.Schema(type=types.Type.STRING),
+                    "query": types.Schema(type=types.Type.STRING),
+                    "github_url": types.Schema(type=types.Type.STRING),
+                    "diff": types.Schema(type=types.Type.STRING),
+                    "ref": types.Schema(type=types.Type.STRING),
+                    "max_bytes": types.Schema(type=types.Type.INTEGER),
+                    "max_matches": types.Schema(type=types.Type.INTEGER),
+                    "max_files": types.Schema(type=types.Type.INTEGER),
+                    "timeout_sec": types.Schema(type=types.Type.INTEGER),
+                    "packages": types.Schema(type=types.Type.STRING),
+                    "requirements_file": types.Schema(type=types.Type.STRING),
+                    "venv_path": types.Schema(type=types.Type.STRING),
+                    "module_name": types.Schema(type=types.Type.STRING),
+                },
+            ),
+        },
+    )
+    
+    output_schema = types.Schema(
+        type=types.Type.OBJECT,
+        required=["mode"],
+        properties={
+            "mode": types.Schema(type=types.Type.STRING, enum=["tool_request", "patch", "feature_summary"]),
+            "requests": types.Schema(type=types.Type.ARRAY, items=request_item),
+            "why": types.Schema(type=types.Type.STRING),
+            "diff": types.Schema(type=types.Type.STRING),
+            "summary": types.Schema(type=types.Type.STRING),
+            "completion_status": types.Schema(type=types.Type.STRING),
+        },
+    )
+    
+    return output_schema
 
 _client = None  # cached client instance
 
 
-def client() -> genai.Client:
+def client():
     """Return a singleton Google GenAI client, reading API key from env.
 
     Raises:
-        RuntimeError: if the GEMINI_API_KEY environment variable is not set.
+        RuntimeError: if the GEMINI_API_KEY environment variable is not set or google-genai is not installed.
     """
     global _client
     if _client is None:
+        genai, _ = _ensure_genai_imported()
         key = os.environ.get("GEMINI_API_KEY")
         if not key:
             raise RuntimeError("Missing GEMINI_API_KEY")
@@ -302,12 +296,18 @@ def call_model(model_input: str, temperature: float = 0.0) -> dict:
     Returns:
         A dictionary parsed from the JSON response. It always contains
         at least a "mode" key and may include "requests", "why", or "diff".
+        
+    Raises:
+        RuntimeError: if google-genai SDK is not available.
     """
+    genai, types = _ensure_genai_imported()
+    output_schema = _build_schemas()
+    
     cfg = types.GenerateContentConfig(
         temperature=temperature,
         system_instruction=SYSTEM,
         response_mime_type="application/json",
-        response_schema=OUTPUT_SCHEMA,
+        response_schema=output_schema,
     )
     resp = client().models.generate_content(
         model=MODEL,
