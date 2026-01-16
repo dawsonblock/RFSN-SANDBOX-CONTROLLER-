@@ -427,36 +427,39 @@ def run_controller(cfg: ControllerConfig) -> Dict[str, Any]:
     except Exception:
         pass
 
-    sb = create_sandbox(run_id=run_id)
-    log_dir = sb.root  # write logs next to sandbox for inspection
-
-    def log(rec: Dict[str, Any]) -> None:
-        write_jsonl(log_dir, rec, clock=clock)
-
-    memory_store: Optional[ActionOutcomeStore] = None
-    bad_hashes: set[str] = set()
-    observations: str = ""  # buffer for tool results to feed back to model
-    patch_attempts: int = 0  # count patch attempts to detect lack of progress
-    steps_without_progress: int = 0  # track steps without reducing failing tests
-    min_failing_tests: int = 999999  # track minimum failing tests seen
-    distinct_sigs: set[str] = set()  # track distinct error signatures for multi-bug detection
-    bailout_reason: Optional[str] = None
-    low_conf_streak: int = 0
-
-    # Initialize vNext components
-    current_phase = Phase.INGEST
-    tool_manager = ToolRequestManager(ToolRequestConfig(max_total_requests_per_run=cfg.max_tool_calls))
-    stall_state = StallState()
+    # Initialize variables that will be used in exception handler
+    sb = None
+    log_dir = None
     evidence_exporter = EvidencePackExporter(EvidencePackConfig())
     command_log: List[Dict[str, Any]] = []
-
-    # Track baseline for evidence pack
-    baseline_output = ""
-    final_output = ""
-    winner_diff = None
-    feature_summary = None  # Store feature summary for evidence pack
-
+    memory_store: Optional[ActionOutcomeStore] = None
+    
     try:
+        sb = create_sandbox(run_id=run_id)
+        log_dir = sb.root  # write logs next to sandbox for inspection
+
+        def log(rec: Dict[str, Any]) -> None:
+            write_jsonl(log_dir, rec, clock=clock)
+
+        bad_hashes: set[str] = set()
+        observations: str = ""  # buffer for tool results to feed back to model
+        patch_attempts: int = 0  # count patch attempts to detect lack of progress
+        steps_without_progress: int = 0  # track steps without reducing failing tests
+        min_failing_tests: int = 999999  # track minimum failing tests seen
+        distinct_sigs: set[str] = set()  # track distinct error signatures for multi-bug detection
+        bailout_reason: Optional[str] = None
+        low_conf_streak: int = 0
+
+        # Initialize vNext components
+        current_phase = Phase.INGEST
+        tool_manager = ToolRequestManager(ToolRequestConfig(max_total_requests_per_run=cfg.max_tool_calls))
+        stall_state = StallState()
+
+        # Track baseline for evidence pack
+        baseline_output = ""
+        final_output = ""
+        winner_diff = None
+        feature_summary = None  # Store feature summary for evidence pack
         log({
             "phase": "run_header",
             "run_id": run_id,
@@ -1737,11 +1740,57 @@ def run_controller(cfg: ControllerConfig) -> Dict[str, Any]:
         }
 
     except Exception as e:
+        # Fail-closed: Create evidence pack even on exception
+        import traceback
+        error_details = traceback.format_exc()
+        
+        # Log error if log directory exists
+        if log_dir:
+            try:
+                write_jsonl(log_dir, {
+                    "phase": "exception",
+                    "error": str(e),
+                    "traceback": error_details,
+                }, clock=clock)
+            except Exception:
+                pass  # If logging fails, continue with error reporting
+        
+        # Try to create a minimal evidence pack
+        evidence_pack_path = None
+        try:
+            # Create minimal state dict with available information
+            state_dict = {
+                "config": cfg.__dict__ if cfg else {},
+                "project_type": None,
+                "setup_commands": [],
+                "effective_test_cmd": None,
+                "steps_taken": 0,
+                "error": str(e),
+                "traceback": error_details,
+                "bailout_reason": f"Exception: {type(e).__name__}: {str(e)}",
+            }
+            
+            evidence_pack_path = evidence_exporter.export(
+                sandbox_root=sb.root if sb else None,
+                log_dir=log_dir,
+                baseline_output="",
+                final_output="",
+                winner_diff=None,
+                state=state_dict,
+                command_log=command_log,
+                run_id=run_id,
+            )
+            print(f"\n[EXCEPTION] Evidence pack created at: {evidence_pack_path}")
+        except Exception as pack_error:
+            print(f"\n[EXCEPTION] Failed to create evidence pack: {pack_error}")
+        
         return {
             "ok": False,
-            "error": f"Exception: {e}",
-            "sandbox": sb.root,
-            "repo_dir": sb.repo_dir,
+            "error": f"Exception: {type(e).__name__}: {str(e)}",
+            "traceback": error_details,
+            "sandbox": sb.root if sb else None,
+            "repo_dir": sb.repo_dir if sb else None,
+            "evidence_pack": evidence_pack_path,
         }
 
     finally:
