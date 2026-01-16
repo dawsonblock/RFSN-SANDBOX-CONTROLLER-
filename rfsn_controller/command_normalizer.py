@@ -6,6 +6,7 @@ due to shell=False execution model.
 """
 
 import re
+import shlex
 from typing import List
 
 
