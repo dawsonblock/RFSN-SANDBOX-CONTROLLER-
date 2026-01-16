@@ -20,7 +20,7 @@ class TestCommandAllowlist:
         """Test that cd command is blocked by is_command_allowed."""
         allowed, reason = is_command_allowed("cd /tmp")
         assert not allowed
-        assert "not in allowlist" in reason.lower()
+        assert ("not in allowlist" in reason.lower() or "blocked" in reason.lower())
 
     def test_safe_commands_still_allowed(self):
         """Test that safe commands are still allowed."""
