@@ -2,6 +2,9 @@
 
 import sys
 
+import pytest
+from tests._netgate import require_network
+
 # Import only what we need, avoiding llm_gemini
 from rfsn_controller.sandbox import (
     create_sandbox,
@@ -117,7 +120,9 @@ def _run_quixbugs_file_collection() -> bool:
     return success
 
 
+@pytest.mark.network
 def test_quixbugs_file_collection():
+    require_network()
     assert _run_quixbugs_file_collection()
 
 
