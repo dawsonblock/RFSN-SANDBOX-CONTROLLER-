@@ -1,1 +1,0 @@
-{"test": "quicksort", "repo": "https://github.com/jkoppel/QuixBugs", "test_cmd": "pytest -q python_testcases/test_quicksort.py", "result": {"ok": true, "sandbox": "/var/folders/xt/jh84t2kj6hl26tk5qx3m_28h0000gn/T/rfsn_sb_e800b8ffb2", "repo_dir": "/var/folders/xt/jh84t2kj6hl26tk5qx3m_28h0000gn/T/rfsn_sb_e800b8ffb2/repo"}, "timestamp": "2026-01-12T17:29:00Z"}

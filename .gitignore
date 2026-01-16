@@ -27,3 +27,6 @@ Thumbs.db
 # Logs
 *.log
 run.jsonl
+
+# Test results and evidence packs
+results/
