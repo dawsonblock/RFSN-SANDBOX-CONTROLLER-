@@ -1,8 +1,12 @@
-# This file should be removed.
-# The following logic should be placed in a new 'tests/conftest.py' file.
+"""Network-test gating utilities for pytest."""
 
-import os
-import pytest
+def require_network() -> None:
+    """
+    Skip the current test unless network tests are enabled.
+    """
+    if os.environ.get("RFSN_ENABLE_NETWORK_TESTS", "").strip() == "1":
+        return
+    pytest.skip("network tests disabled (set RFSN_ENABLE_NETWORK_TESTS=1 to enable)")
 
 def pytest_collection_modifyitems(config, items):
     """
