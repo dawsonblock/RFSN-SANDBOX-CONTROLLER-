@@ -7,7 +7,6 @@ This module tests:
 4. Reproducible verification
 """
 
-import pytest
 from rfsn_controller.controller import ControllerConfig
 
 
