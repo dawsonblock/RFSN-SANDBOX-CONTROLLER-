@@ -435,13 +435,23 @@ When a QuixBugs repository is detected, the controller:
 ### Run Test Suite
 
 ```bash
-pytest test_improvements.py -v
+pytest -q
+```
+
+**Note**: By default, tests run offline and network-dependent tests (QuixBugs integration tests) are skipped.
+
+### Run Network Tests
+
+To run tests that require outbound network access (git clone, external repositories):
+
+```bash
+RFSN_ENABLE_NETWORK_TESTS=1 pytest -q -m network
 ```
 
 ### QuixBugs Integration Test
 
 ```bash
-python test_quixbugs_direct.py
+RFSN_ENABLE_NETWORK_TESTS=1 python test_quixbugs_direct.py
 ```
 
 ---

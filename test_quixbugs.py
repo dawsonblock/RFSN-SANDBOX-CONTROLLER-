@@ -3,6 +3,9 @@
 import sys
 sys.path.insert(0, "/Users/dawsonblock/Desktop/rfsn-sandbox-controller")
 
+import pytest
+from tests._netgate import require_network
+
 from rfsn_controller.sandbox import create_sandbox, clone_public_github
 from rfsn_controller.verifier import run_tests
 from rfsn_controller.controller import _collect_relevant_files_quixbugs
@@ -68,7 +71,9 @@ def _run_quixbugs_file_collection() -> bool:
     return success
 
 
+@pytest.mark.network
 def test_quixbugs_file_collection():
+    require_network()
     assert _run_quixbugs_file_collection()
 
 
