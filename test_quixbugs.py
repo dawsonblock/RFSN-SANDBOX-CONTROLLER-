@@ -1,7 +1,6 @@
 """Test QuixBugs integration with RFSN controller."""
 
 import sys
-sys.path.insert(0, "/Users/dawsonblock/Desktop/rfsn-sandbox-controller")
 
 import pytest
 from tests._netgate import require_network
